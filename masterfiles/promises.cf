@@ -28,6 +28,8 @@ body common control
                           service_catalogue,
                           ha_main,
 
+			  edit_motd,
+
       };
 
       inputs => {
@@ -69,8 +71,9 @@ body common control
 
                 # List of services here
                   "services/file_change.cf",
-                  "cfe_internal/ha/ha.cf"
+                  "cfe_internal/ha/ha.cf",
 
+		  "motd.cf",
       };
 
       version => "CFEngine Promises.cf 3.6.2";
