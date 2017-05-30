@@ -144,8 +144,9 @@ bundle common redhat_knowledge
       "call_yum" string => "$(paths.path[yum])";
 
       # on RHEL 4, Yum doesn't know how to be --quiet
-      "yum_options" string => ifelse("redhat_4", "",
+      "yum_options" string => ifelse("centos_4|redhat_4", "",
                                      "--quiet");
+      "yum_offline_options" string => "$(yum_options) -C";
 
       # yum check-update prints a lot of extra useless lines, but the format of
       # the actual package lines is:
@@ -559,6 +560,15 @@ body package_method apt_get_permissive
 # This package method interacts with the APT package manager through
 # `apt-get`.
 #
+# Normally you have to specify the package version, and it defaults to
+# `*`, which then triggers the bug of installing `xyz-abc` when you ask for `xyz`.
+#
+# This "permissive" body sets
+#
+#    package_name_convention => "$(name)";
+#
+# which is permissive in the sense of not requiring the version.
+#
 # **Example:**
 #
 # ```cf3
@@ -833,7 +843,7 @@ body package_method yum
 {
       package_changes => "bulk";
       package_list_command => "$(rpm_knowledge.call_rpm) -qa --qf '$(rpm_knowledge.rpm3_output_format)'";
-      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_options) check-update $(redhat_knowledge.check_update_postproc)";
+      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_offline_options) check-update $(redhat_knowledge.check_update_postproc)";
 
       package_list_name_regex    => "$(rpm_knowledge.rpm3_name_regex)";
       package_list_version_regex => "$(rpm_knowledge.rpm3_version_regex)";
@@ -887,7 +897,7 @@ body package_method yum_rpm
 {
       package_changes => "bulk";
       package_list_command => "$(rpm_knowledge.call_rpm) -qa --qf '$(rpm_knowledge.rpm3_output_format)'";
-      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_options) check-update $(redhat_knowledge.check_update_postproc)";
+      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_offline_options) check-update $(redhat_knowledge.check_update_postproc)";
 
       package_list_name_regex    => "$(rpm_knowledge.rpm3_name_regex)";
       package_list_version_regex => "$(rpm_knowledge.rpm3_version_regex)";
@@ -928,6 +938,15 @@ body package_method yum_rpm_permissive
 # packages and can't take a target version or architecture, so only
 # the "add" and "addupdate" methods should be used.
 #
+# Normally you have to specify the package version, and it defaults to
+# `*`, which then triggers the bug of installing `xyz-abc` when you ask for `xyz`.
+#
+# This "permissive" body sets
+#
+#    package_name_convention => "$(name)";
+#
+# which is permissive in the sense of not requiring the version.
+#
 # **Example:**
 #
 # ```cf3
@@ -937,7 +956,7 @@ body package_method yum_rpm_permissive
 {
       package_changes => "bulk";
       package_list_command => "$(rpm_knowledge.call_rpm) -qa --qf '$(rpm_knowledge.rpm3_output_format)'";
-      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_options) check-update $(redhat_knowledge.check_update_postproc)";
+      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_offline_options) check-update $(redhat_knowledge.check_update_postproc)";
 
       package_list_name_regex    => "$(rpm_knowledge.rpm3_name_regex)";
       package_list_version_regex => "$(rpm_knowledge.rpm3_version_regex)";
@@ -989,7 +1008,7 @@ body package_method yum_rpm_enable_repo(repoid)
 {
       package_changes => "bulk";
       package_list_command => "$(rpm_knowledge.call_rpm) -qa --qf '$(rpm_knowledge.rpm2_output_format)'";
-      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_options) check-update $(redhat_knowledge.check_update_postproc)";
+      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_offline_options) check-update $(redhat_knowledge.check_update_postproc)";
 
       package_list_name_regex    => "$(rpm_knowledge.rpm2_name_regex)";
       package_list_version_regex => "$(rpm_knowledge.rpm2_version_regex)";
@@ -1616,7 +1635,7 @@ body package_method generic
     redhat::
       package_changes => "bulk";
       package_list_command => "$(rpm_knowledge.call_rpm) -qa --qf '$(rpm_knowledge.rpm3_output_format)'";
-      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_options) check-update $(redhat_knowledge.check_update_postproc)";
+      package_patch_list_command => "$(redhat_knowledge.call_yum) $(redhat_knowledge.yum_offline_options) check-update $(redhat_knowledge.check_update_postproc)";
 
       package_list_name_regex    => "$(rpm_knowledge.rpm3_name_regex)";
       package_list_version_regex => "$(rpm_knowledge.rpm3_version_regex)";
@@ -1708,8 +1727,8 @@ body package_method generic
     gentoo::
       package_changes => "individual";
       package_list_command => "/bin/sh -c '/bin/ls -d /var/db/pkg/*/* | cut -c 13-'";
-      package_list_name_regex => ".*/([^\s]+)-\d.*";
-      package_list_version_regex => ".*/[^\s]+-(\d.*)";
+      package_list_name_regex => "([^/]+/(?:(?!-\d).)+)-\d.*";
+      package_list_version_regex => "[^/]+/(?:(?!-\d).)+-(\d.*)";
       package_installed_regex => ".*";                          # all reported are installed
       package_name_convention => "$(name)";
       package_list_update_command => "/bin/true";               # I prefer manual syncing
