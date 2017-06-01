@@ -395,7 +395,7 @@ bundle edit_line manage_variable_values_ini(tab, sectionName)
       "$(index)\s*=.*"
       edit_field => col("=","2","$($(tab)[$(sectionName)][$(index)])","set"),
       select_region => INI_section("$(sectionName)"),
-      classes => if_ok("manage_variable_values_ini_not_$(cindex[$(index)])"),
+      classes => results("bundle", "manage_variable_values_ini_not_$(cindex[$(index)])"),
       ifvarclass => "edit_$(cindex[$(index)])";
 
   delete_lines:
@@ -410,7 +410,7 @@ bundle edit_line manage_variable_values_ini(tab, sectionName)
 
       "$(index)=$($(tab)[$(sectionName)][$(index)])"
       select_region => INI_section("$(sectionName)"),
-      ifvarclass => "!manage_variable_values_ini_not_$(cindex[$(index)]).edit_$(cindex[$(index)])";
+        ifvarclass => "!(manage_variable_values_ini_not_$(cindex[$(index)])_kept|manage_variable_values_ini_not_$(cindex[$(index)])_repaired).edit_$(cindex[$(index)])";
 
 }
 
@@ -452,7 +452,7 @@ bundle edit_line set_variable_values_ini(tab, sectionName)
       "$(index)\s*=.*"
       edit_field => col("=","2","$($(tab)[$(sectionName)][$(index)])","set"),
       select_region => INI_section("$(sectionName)"),
-      classes => if_ok("set_variable_values_ini_not_$(cindex[$(index)])"),
+      classes => results("bundle", "set_variable_values_ini_not_$(cindex[$(index)])"),
       ifvarclass => "edit_$(cindex[$(index)])";
 
   insert_lines:
@@ -462,7 +462,7 @@ bundle edit_line set_variable_values_ini(tab, sectionName)
 
       "$(index)=$($(tab)[$(sectionName)][$(index)])"
       select_region => INI_section("$(sectionName)"),
-      ifvarclass => "!set_variable_values_ini_not_$(cindex[$(index)]).edit_$(cindex[$(index)])";
+        ifvarclass => "!(set_variable_values_ini_not_$(cindex[$(index)])_kept|set_variable_values_ini_not_$(cindex[$(index)])_repaired).edit_$(cindex[$(index)])";
 
 }
 
@@ -542,13 +542,13 @@ bundle edit_line set_quoted_values(v)
       # match a line starting like the key = something
       "\s*$(index)\s*=.*"
       edit_field => col("=","2",'"$($(v)[$(index)])"',"set"),
-      classes    => if_ok("$(cindex[$(index)])_in_file"),
+      classes    => results("bundle", "$(cindex[$(index)])_in_file"),
       comment    => "Match a line starting like key = something";
 
   insert_lines:
       '$(index)="$($(v)[$(index)])"'
       comment    => "Insert a variable definition",
-      ifvarclass => "!$(cindex[$(index)])_in_file";
+        ifvarclass => "!($(cindex[$(index)])_in_file_kept|$(cindex[$(index)])_in_file_repaired)";
 }
 
 ##
@@ -574,7 +574,7 @@ bundle edit_line set_variable_values(v)
 #
 #     files:
 #        "myfile"
-#          edit_line => set_quoted_values(stuff)
+#          edit_line => set_variable_values(stuff)
 # ```
 #
 # **See also:** `set_quoted_values()`
@@ -604,7 +604,7 @@ bundle edit_line set_variable_values(v)
       "\s*$(index)\s*=.*"
 
       edit_field => col("\s*$(index)\s*=","2","$($(v)[$(index)])","set"),
-      classes => if_ok("$(cv)_$(cindex[$(index)])_in_file"),
+      classes => results("bundle", "$(cv)_$(cindex[$(index)])_in_file"),
       comment => "Match a line starting like key = something";
 
   insert_lines:
@@ -612,7 +612,7 @@ bundle edit_line set_variable_values(v)
       "$(index)=$($(v)[$(index)])"
 
       comment => "Insert a variable definition",
-      ifvarclass => "!$(cv)_$(cindex[$(index)])_in_file";
+        ifvarclass => "!($(cv)_$(cindex[$(index)])_in_file_kept|$(cv)_$(cindex[$(index)])_in_file_repaired)";
 }
 
 bundle edit_line set_config_values(v)
@@ -664,15 +664,15 @@ bundle edit_line set_config_values(v)
       "^\s*#\s*($(index)\s+.*|$(index))$"
              comment => "Uncommented the value $(index)",
         replace_with => value("$(index) $($(v)[$(index)])"),
-          ifvarclass => "!line_exists_$(cindex[$(index)]).!replace_attempted_$(cindex[$(index)]).!multiple_comments_$(cindex[$(index)])",
-             classes => always("uncommented_$(cindex[$(index)])");
-      
+          ifvarclass => "!line_exists_$(cindex[$(index)]).!replace_attempted_$(cindex[$(index)])_reached.!multiple_comments_$(cindex[$(index)])",
+             classes => results("bundle", "uncommented_$(cindex[$(index)])");
+
       # If the line is there with the wrong value, replace with
       # the correct value
       "^\s*($(index)\s+(?!$(ev[$(index)])$).*|$(index))$"
            comment => "Correct the value $(index)",
       replace_with => value("$(index) $($(v)[$(index)])"),
-           classes => always("replace_attempted_$(cindex[$(index)])");
+           classes => results("bundle", "replace_attempted_$(cindex[$(index)])");
 
   insert_lines:
       # If the line doesn't exist, or there is more than one occurance
@@ -681,13 +681,13 @@ bundle edit_line set_config_values(v)
       "$(index) $($(v)[$(index)])"
          comment => "Insert the value, marker exists $(index)",
         location => after("^\s*#\s*($(index)\s+.*|$(index))$"),
-      ifvarclass => "replace_attempted_$(cindex[$(index)]).multiple_comments_$(cindex[$(index)])";
+      ifvarclass => "replace_attempted_$(cindex[$(index)])_reached.multiple_comments_$(cindex[$(index)])";
 
-      # If the line doesn't exist and there are no occurances
+      # If the line doesn't exist and there are no occurrences
       # of the LHS commented out, insert a new line at the eof
       "$(index) $($(v)[$(index)])"
          comment => "Insert the value, marker doesn't exist $(index)",
-      ifvarclass => "replace_attempted_$(cindex[$(index)]).!multiple_comments_$(cindex[$(index)])";
+      ifvarclass => "replace_attempted_$(cindex[$(index)])_reached.!multiple_comments_$(cindex[$(index)])";
 
 }
 
@@ -770,15 +770,15 @@ bundle edit_line set_line_based(v, sep, bp, kp, cp)
       "^$(cp)($(i)$(bp).*|$(i))$"
              comment => "Uncommented the value '$(i)'",
         replace_with => value("$(i)$(sep)$($(v)[$(i)])"),
-          ifvarclass => "!exists_$(ci[$(i)]).!replace_attempted_$(ci[$(i)]).!multiple_comments_$(ci[$(i)])",
-             classes => always("uncommented_$(ci[$(i)])");
+          ifvarclass => "!exists_$(ci[$(i)]).!replace_attempted_$(ci[$(i)])_reached.!multiple_comments_$(ci[$(i)])",
+             classes => results("bundle", "uncommented_$(ci[$(i)])");
 
       # If the line is there with the wrong value, replace with
       # the correct value
       "^\s*($(i)$(bp)(?!$(ev[$(i)])$).*|$(i))$"
            comment => "Correct the value '$(i)'",
       replace_with => value("$(i)$(sep)$($(v)[$(i)])"),
-           classes => always("replace_attempted_$(ci[$(i)])");
+           classes => results("bundle", "replace_attempted_$(ci[$(i)])");
 
   insert_lines:
       # If the line doesn't exist, or there is more than one occurrence
@@ -787,19 +787,18 @@ bundle edit_line set_line_based(v, sep, bp, kp, cp)
       "$(i)$(sep)$($(v)[$(i)])"
          comment => "Insert the value, marker '$(i)' exists",
         location => after("^$(cp)($(i)$(bp).*|$(i))$"),
-      ifvarclass => "replace_attempted_$(ci[$(i)]).multiple_comments_$(ci[$(i)])";
+      ifvarclass => "replace_attempted_$(ci[$(i)])_reached.multiple_comments_$(ci[$(i)])";
 
       # If the line doesn't exist and there are no occurrences
       # of the LHS commented out, insert a new line at the eof
       "$(i)$(sep)$($(v)[$(i)])"
          comment => "Insert the value, marker '$(i)' doesn't exist",
-      ifvarclass => "replace_attempted_$(ci[$(i)]).!multiple_comments_$(ci[$(i)]).!exists_$(ci[$(i)])";
+      ifvarclass => "replace_attempted_$(ci[$(i)])_reached.!multiple_comments_$(ci[$(i)]).!exists_$(ci[$(i)])";
 
   reports:
     verbose_mode|EXTRA::
       "$(this.bundle): Line for '$(i)' exists" ifvarclass => "exists_$(ci[$(i)])";
       "$(this.bundle): Line for '$(i)' does not exist" ifvarclass => "!exists_$(ci[$(i)])";
-
 }
 
 bundle edit_line set_config_values_matching(v,pat)
@@ -837,11 +836,11 @@ bundle edit_line set_config_values_matching(v,pat)
       "^\s*($(index)\s+(?!$($(v)[$(index)])).*|# ?$(index)\s+.*)$"
       comment => "Correct the value",
       replace_with => value("$(index) $($(v)[$(index)])"),
-      classes => always("replace_attempted_$(cindex[$(index)])");
+      classes => results("bundle", "replace_attempted_$(cindex[$(index)])");
 
   insert_lines:
       "$(index) $($(v)[$(index)])"
-      ifvarclass => "replace_attempted_$(cindex[$(index)])";
+      ifvarclass => "replace_attempted_$(cindex[$(index)])_reached";
 
 }
 
@@ -1038,7 +1037,7 @@ bundle edit_line replace_or_add(pattern,line)
       "^(?!$(eline)$)$(pattern)$"
       comment => "Replace a pattern here",
       replace_with => value("$(line)"),
-      classes => scoped_classes_generic("bundle", "replace_$(cline)");
+      classes => results("bundle", "replace_$(cline)");
 
   insert_lines:
       "$(line)"
@@ -1292,7 +1291,7 @@ body copy_from secure_cp(from,server)
 #
 # Only copy the file if it is different from the local copy, and verify
 # that the copy is correct.
-# 
+#
 # @param from The location of the file on the remote server
 # @param server The hostname or IP of the server from which to download
 {
@@ -1323,6 +1322,8 @@ body copy_from remote_dcp(from,server)
 #
 # @param from The location of the file on the remote server
 # @param server The hostname or IP of the server from which to download
+#
+# **See Also:** `local_dcp()`
 {
       servers     => { "$(server)" };
       source      => "$(from)";
@@ -1332,9 +1333,22 @@ body copy_from remote_dcp(from,server)
 ##
 
 body copy_from local_cp(from)
-# @brief Copy a local file.
-#
+# @brief Copy a file if the modification time or creation time of the source
+# file is newer (the default comparison mechanism).
 # @param from The path to the source file.
+#
+# **Example:**
+#
+# ```cf3
+# bundle agent example
+# {
+#   files:
+#       "/tmp/file.bak"
+#         copy_from => local_cp("/tmp/file");
+# }
+# ```
+#
+# **See Also:** `local_dcp()`
 {
       source      => "$(from)";
 }
@@ -1342,9 +1356,21 @@ body copy_from local_cp(from)
 ##
 
 body copy_from local_dcp(from)
-# @brief Copy a local file if it is different from the existing copy.
-#
+# @brief Copy a local file if the hash on the source file differs.
 # @param from The path to the source file.
+#
+# **Example:**
+#
+# ```cf3
+# bundle agent example
+# {
+#   files:
+#       "/tmp/file.bak"
+#       copy_from => local_dcp("/tmp/file");
+# }
+# ```
+#
+# **See Also:** `local_cp()`, `remote_dcp()`
 {
       source      => "$(from)";
       compare     => "digest";
@@ -1384,9 +1410,24 @@ body copy_from backup_local_cp(from)
 ##
 
 body copy_from seed_cp(from)
-# @brief Copy a local file if the file does not already exist, i.e. seed the placement
-#
+# @brief Copy a local file if the file does not already exist, i.e. seed the
+# placement
 # @param from The path to the source file.
+#
+# **Example:**
+#
+# ```cf3
+# bundle agent home_dir_init
+# {
+#   files:
+#       "/home/mark.burgess/."
+#       copy_from => seed_cp("/etc/skel"),
+#       depth_search => recurse(inf),
+#       file_select => all,
+#       comment => "We want to be sure that the home directory has files that are
+#                   present in the skeleton.";
+# }
+# ```
 {
       source      => "$(from)";
       compare     => "exists";
@@ -1395,10 +1436,28 @@ body copy_from seed_cp(from)
 ##
 
 body copy_from sync_cp(from,server)
-# @brief Download a file if the local copy does not already exist, i.e. seed the placement
+# @brief Synchronize a file with a remote server.
+#
+# * If the file does not exist on the remote server then it should be purged.
+# * Allow types to change (directories to files and vice versa).
+# * The mode of the remote file should be preserved.
+# * Files are compared using the default comparison (mtime or ctime).
 #
 # @param from The location of the file on the remote server
 # @param server The hostname or IP of the server from which to download
+#
+# **Example**:
+#
+# ```cf3
+# files:
+#   "/tmp/masterfiles/."
+#     copy_from => sync_cp( "/var/cfengine/masterfiles", $(sys.policy_server) ),
+#     depth_search => recurse(inf),
+#     file_select => all,
+#     comment => "Mirror masterfiles from the hub to a temporary directory";
+# ```
+#
+# **See Also:** `dir_sync()`, `copyfrom_sync()`
 {
       servers     => { "$(server)" };
       source      => "$(from)";
@@ -1467,7 +1526,7 @@ body link_from linkchildren(tofile)
 # If the promiser is a directory, children are linked to the source, unless
 # entries with identical names already exist.
 # The link is created even if the source of the link does not exist.
-# 
+#
 # @param tofile The source of the link
 {
       source        => "$(tofile)";
@@ -1571,7 +1630,7 @@ body perms system_owned(mode)
 
 body acl access_generic(acl)
 # @brief Set the `aces` of the access control as specified
-# 
+#
 # Default/inherited ACLs are left unchanged. This body is
 # applicable for both files and directories on all platforms.
 #
@@ -1607,8 +1666,8 @@ body acl ntfs(acl)
 body acl strict
 # @brief Limit file access via ACLs to users with administrator privileges,
 # overwriting existing ACLs.
-# 
-# **Note:** May need to take ownership of file/dir to be sure no-one else is 
+#
+# **Note:** May need to take ownership of file/dir to be sure no-one else is
 # allowed access.
 {
       acl_method => "overwrite";
@@ -1817,7 +1876,7 @@ body file_select older_than(years, months, days, hours, minutes, seconds)
 # @param hours Number of hours
 # @param minutes Number of minutes
 # @param seconds Number of seconds
-# 
+#
 # Generic older_than selection body, aimed to have a common definition handy
 # for every case possible.
 {
@@ -1845,9 +1904,9 @@ body file_select filetype_older_than(filetype, days)
 
 body file_select filetypes_older_than(filetypes, days)
 # @brief Select files of specified types older than specified number of days
-# 
+#
 # This body only takes a list of filetypes
-# 
+#
 # @param filetypes A list of file types
 # @param days Number of days
 #
@@ -1913,7 +1972,7 @@ body changes detect_content
 
 body changes detect_content_using(hash)
 # @brief Detect file content changes using a given hash algorithm.
-# 
+#
 # For times when you only care about content, not file stats e.g. mtime
 # @param hash - supported hashing algorithm (md5, sha1, sha224, sha256, sha384,
 #   sha512, best)
