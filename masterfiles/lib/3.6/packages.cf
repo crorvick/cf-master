@@ -1247,6 +1247,36 @@ body package_method smartos
       package_update_command =>  "/opt/local/bin/pkgin -y install";
 }
 
+body package_method smartos_pkg_add(repo)
+# @brief SmartOS pkg_add installation package method
+#
+# This package method interacts with SmartOS pkg_add to install from local
+# or remote repositories. It is slightly different than the FreeBSD pkg_add.
+#
+# This example installs "perl5" from a remote repository.
+#
+# ```cf3
+# ----------------------------
+# packages:
+#   "perl5"
+#     package_policy   =>  "add",
+#     package_method   =>  smartos_pkg_add("http://pkg.example.com/packages/");
+#
+# ```
+{
+      package_changes => "individual";
+      package_list_command => "/opt/local/sbin/pkg_info";
+      package_list_name_regex    => "([^\s]+)\-[0-9]+.*\s";
+      package_list_version_regex => "[^\s]+\-([0-9][^\s]+)\s";
+
+      package_installed_regex => ".*"; # all reported are installed
+
+      package_add_command => "/usr/bin/env PKG_PATH=$(repo) /opt/local/sbin/pkg_add";
+
+      package_delete_command => "/opt/local/sbin/pkg_delete";
+      package_update_command => "/usr/bin/env PKG_PATH=$(repo) /opt/local/sbin/pkg_add";
+}
+
 body package_method opencsw
 # @depends common_knowledge
 # @brief OpenCSW (Solaris software packages) method
@@ -1631,7 +1661,7 @@ body package_method generic
       package_list_command => "$(rpm_knowledge.call_rpm) -qa --queryformat \"$(rpm_knowledge.rpm_output_format)\"";
       # set it to "0" to avoid caching of list during upgrade
       package_list_update_command => "$(suse_knowledge.call_zypper) list-updates";
-      package_list_update_ifelapsed => "0";
+      package_list_update_ifelapsed => "$(common_knowledge.list_update_ifelapsed)";
       package_patch_list_command => "$(suse_knowledge.call_zypper) patches";
       package_installed_regex => "i.*";
       package_list_name_regex    => "$(rpm_knowledge.rpm_name_regex)";
