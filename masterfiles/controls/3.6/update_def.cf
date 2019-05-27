@@ -4,7 +4,7 @@ bundle common update_def
       "have_augments_file" expression => fileexists($(augments_file)), scope => "bundle";
 
   vars:
-      "current_version" string => "3.7.5";
+      "current_version" string => "3.10.5";
     any::
       "augments_file" string => "$(this.promise_dirname)/../../def.json";
 
@@ -63,7 +63,7 @@ bundle common update_def
       comment => "Group that CFEngine Enterprise webserver runs as",
       handle => "common_def_vars_cf_cfapache_group";
 
-    # enable_cfengine_enterprise_hub_ha is defined below 
+    # enable_cfengine_enterprise_hub_ha is defined below
     # Disabled by default
 
     enable_cfengine_enterprise_hub_ha::
@@ -88,7 +88,7 @@ bundle common update_def
 
       # NOTE THAT ENABLING THIS BY DEFAULT *WILL* OVERWRITE THE HUB'S $(sys.workdir)/masterfiles
 
-      #"cfengine_internal_masterfiles_update" expression => "enterprise.!(cfengine_3_4|cfengine_3_5)";
+      #"cfengine_internal_masterfiles_update" expression => "enterprise_edition";
       "cfengine_internal_masterfiles_update" expression => "!any";
 
       # Transfer policies and binaries with encryption
@@ -128,9 +128,9 @@ bundle common update_def
         expression => "!any",
         comment => "When cf_promises_validated is disabled remote agents will
                    always scan all of masterfiles for changes. Disabling this
-                   is not recomended as it will increase the load on the policy
+                   is not recommended as it will increase the load on the policy
                    server and increases the possibility for remote agents to
-                   recieve broken policy.";
+                   receive broken policy.";
 
       # Enable CFEngine Enterprise HA Policy
       "enable_cfengine_enterprise_hub_ha" expression => "!any";
