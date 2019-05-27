@@ -14,6 +14,7 @@ body common control
                           "cfe_internal_update_policy",
                           "cfengine_internal_standalone_self_upgrade",
                           "cfe_internal_update_processes",
+                          @(update_def.bundlesequence_end), # Define control_common_update_bundlesequnce_end via augments
       };
 
       version => "update.cf $(update_def.current_version)";
@@ -26,24 +27,20 @@ body common control
                   "cfe_internal/update/cfe_internal_local_git_remote.cf",
                   "cfe_internal/update/cfe_internal_update_from_repository.cf",
                   "cfe_internal/update/update_policy.cf",
-                  "cfe_internal/update/update_processes.cf"
+                  "cfe_internal/update/update_processes.cf",
+                  @(update_def.augments_inputs)
       };
+
+    any::
+        ignore_missing_bundles => "$(update_def.control_common_ignore_missing_bundles)";
+        ignore_missing_inputs => "$(update_def.control_common_ignore_missing_inputs)";
+
 }
 
 #############################################################################
 bundle common cfengine_update_controls
 {
   vars:
-    # 3.6 uses the split controls
-    cfengine_3_6::
-      "update_def_inputs"
-        slist => {
-                   "controls/$(sys.cf_version_major).$(sys.cf_version_minor)/update_def.cf",
-                   "controls/$(sys.cf_version_major).$(sys.cf_version_minor)/update_def_inputs.cf",
-                 };
-
-    # 3.7+ uses the re-unified controls
-    !cfengine_3_6::
        "update_def_inputs"
         slist => {
                    "controls/update_def.cf",
@@ -56,9 +53,38 @@ bundle common cfengine_update_controls
 }
 
 bundle agent cfengine_internal_standalone_self_upgrade
+# @brief Manage desired version state and execution of policy to reach the target version.
+{
+  methods:
+      "cfengine_internal_standalone_self_upgrade_state_data";
+      "cfengine_internal_standalone_self_upgrade_execution";
+}
+bundle agent cfengine_internal_standalone_self_upgrade_state_data
+# @brief Clear stale recorded desired version information from state
+{
+  vars:
+
+      "binary_upgrade_entry"
+        string => "$(this.promise_dirname)/standalone_self_upgrade.cf";
+
+      "desired_pkg_data_path" string =>
+        "$(cfengine_internal_standalone_self_upgrade_execution.desired_pkg_data_path)";
+
+  files:
+
+      # We consider the data stale if it's older than the policy that generated it
+      "$(desired_pkg_data_path)" -> { "ENT-4317" }
+        delete => u_tidy,
+        if => isnewerthan( $(binary_upgrade_entry) , $(desired_pkg_data_path) );
+}
+bundle agent cfengine_internal_standalone_self_upgrade_execution
 # @brief Manage the version of CFEngine that is currently installed. This policy
 # executes a stand alone policy as a sub agent. If systemd is found we assume
 # that it is necessary to escape the current unit via systemd-run.
+#
+# If the running version matches either the desired version information in state
+# or the version supplied from augments, then we skip running the standalone
+# upgrade policy.
 {
   vars:
 
@@ -71,17 +97,34 @@ bundle agent cfengine_internal_standalone_self_upgrade
         string => "$(sys.statedir)/MPF/desired-cfengine-package-version.json";
 
       "desired_pkg_data" -> { "ENT-3592" }
-        data => readjson( $(desired_pkg_data_path) ),
+        data => readjson( $(desired_pkg_data_path), inf ),
         if => fileexists( $(desired_pkg_data_path) );
+
+      "local_update_log_dir"
+        string => translatepath("$(sys.workdir)/software_updates/update_log"),
+        comment => "This directory is used for logging the current version of cfengine running.";
 
   classes:
       # If we are running the version desired by the self upgrade policy
-      "at_desired_version" -> { "ENT-3592" }
+      "at_desired_version_by_policy_specification" -> { "ENT-3592" }
         expression => strcmp( "$(desired_pkg_data[version])", "$(sys.cf_version)"  );
 
       # If we are running the version explicitly defined by the user
-      "at_desired_version" -> { "ENT-3592" }
+      "at_desired_version_by_user_specification" -> { "ENT-3592" }
         expression => strcmp( "$(def.cfengine_software_pkg_version)", "$(sys.cf_version)" );
+
+      "at_desired_version"
+        or => { "at_desired_version_by_user_specification", "at_desired_version_by_policy_specification" };
+
+  files:
+
+    enterprise_edition::
+
+      "$(local_update_log_dir)/$(sys.cf_version)_is_running" -> { "ENT-4352" }
+        comment => "This results in a record of the first time the enterprise
+                    agent of a given version is seen to run on a host.",
+        handle => "cfe_internal_update_bins_files_version_is_running",
+        create => "true";
 
   commands:
 

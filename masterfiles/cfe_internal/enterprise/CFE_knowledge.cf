@@ -15,6 +15,7 @@
 ##################################################################
 
 bundle agent cfe_internal_setup_knowledge
+# @brief Policy related to enterprise hubs
 {
 
   classes:
@@ -33,11 +34,17 @@ bundle agent cfe_internal_setup_knowledge
 
   files:
 
+    !mpf_disable_mission_portal_docroot_sync_from_share_gui::
       "$(cfe_internal_hub_vars.docroot)"
       comment => "Copy the basic knowledge base configuration from the installation to doc root",
       handle => "cfe_internal_setup_knowledge_files_doc_root_1",
       copy_from => no_backup_cp("$(sys.workdir)/share/GUI"),
       depth_search => recurse("inf");
+
+    any::
+
+      "/var/log/CFEngineHub-Install.log" -> { "ENT-4506" }
+        perms => mog("0600", "root", "root" );
 
       "$(cfe_internal_hub_vars.docroot)"
       comment => "All files in there should be at least 0644",
@@ -124,6 +131,13 @@ bundle agent cfe_internal_setup_knowledge
       file_select => cfe_internal_docroot_api_static_perms,
       perms => mog("0440", "root", $(def.cf_apache_group) );
 
+      "$(cfe_internal_hub_vars.docroot)/api/static/." -> { "ENT-4551" }
+        comment => ".status, .pid, and potentially .abort files need to be writeable so that the async query API will function properly",
+        handle => "cfe_internal_setup_knowledge_files_doc_root_api_static_async_query_status",
+        depth_search => recurse("inf"),
+        file_select => cfe_internal_docroot_api_static_async_query_status_status_perms,
+        perms => mog("0660", "root", $(def.cf_apache_group) );
+
       "$(sys.workdir)/httpd/logs/."
       comment => "Ensure permissions for $(sys.workdir)/httpd/logs",
       handle => "cfe_internal_setup_knowledge_files_httpd_logs",
@@ -166,6 +180,15 @@ bundle agent cfe_internal_setup_knowledge
         perms => mog("0440", "root", $(def.cf_apache_group) ),
         comment => ".htaccess files should only be readable by webserver.";
 
+      "$(cfe_internal_hub_vars.docroot)/ldap/config/settings.ldap.php" -> { "ENT-3400" }
+        handle => "cfe_internal_setup_knowledge_files_ldap_config_settings_perms",
+        perms => mog("0600", $(def.cf_apache_user), $(def.cf_apache_group) ),
+        if => fileexists( "$(cfe_internal_hub_vars.docroot)/ldap/config/settings.ldap.php" ),
+        comment => "If the ldap settings are not writeable by
+                    $(def.cf_apache_user) then users will not be able to change
+                    ldap settings.";
+
+
       "$(sys.workdir)/share/GUI/."
         perms => mog("0400", "root", "root" ),
         depth_search => recurse_basedir("inf"),
@@ -181,28 +204,52 @@ bundle agent cfe_internal_setup_knowledge
         perms => mog("755", "root", "root"),
         comment => "The agent will complain if any other users (group or other)
                     have write access to the modules directory.";
+
+}
+
+bundle agent cfe_internal_permissions
+# @brief Specific expectations for permissions and ownership of CFEngine with respect to the Enterprise Edition
+{
+
+  files:
+
+    !(policy_server|am_policy_hub)::
+      "$(sys.statedir)/."
+        perms => mog("0600", "root", "root"),
+        # Important to recurse across file system boundaries, as databases and or state are commonly on different filesystems
+        depth_search => recurse_with_base( inf ),
+        file_select => all;
+
+    enterprise_edition.(policy_server|am_policy_hub)::
+
+     "$(sys.statedir)/."
+        perms => mog("0640", "root", "cfpostgres"),
+        comment => "The database user must be able to read the parent directory of the database or it won't be accessible";
+
+     "$(sys.statedir)/."
+        perms => mog("0600", "root", "root" ),
+        depth_search => recurse_except( inf, "pg" ),
+        file_select => all,
+        comment => "The database user must be able to read the parent directory of the database or it won't be accessible";
+
+      "$(sys.statedir)/pg/."
+        perms => mog("0600", "cfpostgres", "cfpostgres"),
+        depth_search => recurse_with_base( inf ),
+        comment => "No one except for the database user needs to access where the db is installed.";
 }
 
 #############################################################################
-
-body action aggregator
+body depth_search recurse_except( d, exception)
 {
-      ifelapsed => "120";
-      expireafter => "240";
-      background => "true";
-}
-
-############################################################################
-
-body file_select folder(regex)
-{
-      leaf_name  => { ".*$(regex)$"};
-      file_result => "leaf_name";
+        depth => "$(d)";
+        include_basedir => "false";
+        exclude_dirs => { $(exception) };
 }
 
 ############################################################################
 
 body depth_search recurse_basedir(d)
+# @brief Search `d` levels deep including the base dir
 {
       depth => "$(d)";
       include_basedir => "true";
@@ -211,6 +258,7 @@ body depth_search recurse_basedir(d)
 ###########################################################################
 
 body depth_search recurse_basedir_exclude(d)
+# @brief Search `d` levels deep including the base dir but exclude some specific dirs
 {
       depth => "$(d)";
       include_basedir => "true";
@@ -220,13 +268,17 @@ body depth_search recurse_basedir_exclude(d)
 ############################################################################
 
 body file_select cfe_internal_docroot_perms
+# @brief Select files not named `.htacces` or `settings.ldap.php`
 {
-  leaf_name => { "\.htaccess" };
+  leaf_name => { "\.htaccess", "settings.ldap.php" };
+      # htaccess are going the way of the dodo bird
+      # settings.ldap.php permissions are handled explicitly in it's own bundle
   file_result => "!leaf_name";
 }
 
 ############################################################################
 body depth_search recurse_exclude(d)
+# @brief Search to a depth of `d` excluding known directories
 {
       depth => "$(d)";
       exclude_dirs => { "hub" , "graphs", "scripts", "tmp", "logs", "api", "rest", "application", "dc-scripts" };
@@ -234,16 +286,8 @@ body depth_search recurse_exclude(d)
 
 ############################################################################
 
-body process_count check_process(in,out)
-{
-      match_range => "1,1";
-      in_range_define => { "$(in)" };
-      out_of_range_define => { "$(out)" };
-}
-
-############################################################################
-
 body file_select cfe_internal_exclude_sh_pl_scripts
+# @brief select plain files not ending in `.sh` and `.pl`
 {
   leaf_name => { ".*\.sh",".*\.pl"};
   file_types => { "plain" };
@@ -253,6 +297,7 @@ body file_select cfe_internal_exclude_sh_pl_scripts
 ############################################################################
 
 body file_select cfe_internal_sh_pl_scripts
+# @brief select plain files ending in `.sh` and `.pl`
 {
   leaf_name => { ".*\.sh",".*\.pl" };
   file_types => { "plain" };
@@ -262,6 +307,7 @@ body file_select cfe_internal_sh_pl_scripts
 ############################################################################
 
 body file_select cfe_internal_htaccess
+# @brief select files named `.htaccess`
 {
   leaf_name => { "\.htaccess" };
   file_result => "leaf_name";
@@ -279,8 +325,23 @@ body file_select cfe_internal_exclude_index_html
 
 body file_select cfe_internal_docroot_api_static_perms
 {
-  leaf_name => { "\.htaccess" };
+      # ENT-4551 - .status, .pid, and potentially .abort files used by async
+      # query mechanism need to be writeable by the webserver, we exclude those
+      # files here to avoid continual promise repair.
+
+  leaf_name => { "\.htaccess", "\.status", "\.pid", "\.abort" };
   file_result => "!leaf_name";
+}
+############################################################################
+
+body file_select cfe_internal_docroot_api_static_async_query_status_status_perms
+# @brief .status, .pid and .abort files are used by the asynchronous query API and need to be writeable
+{
+      # ENT-4551 - .status, .pid, and potentially .abort files used by async
+      # query mechanism need to be writeable by the webserver
+
+        leaf_name => { "\.status", "\.pid", "\.abort" };
+        file_result => "leaf_name";
 }
 
 ############################################################################

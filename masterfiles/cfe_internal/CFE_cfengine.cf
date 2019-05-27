@@ -14,6 +14,25 @@
 #  - some agent bundles are in CFE_hub_specific.cf
 #
 ##################################################################
+bundle common cfe_internal_management_file_control
+{
+  vars:
+
+      "inputs" slist => { };
+
+    cfengine_recommendations_enabled::
+      "input[cfengine_recommendations]"
+        string => "$(this.promise_dirname)/recommendations.cf";
+
+    any::
+      "inputs" slist => getvalues( input );
+}
+
+body file control
+{
+    cfengine_recommendations_enabled::
+      inputs => { @(cfe_internal_management_file_control.inputs) };
+}
 
 bundle agent cfe_internal_management
 {
@@ -36,6 +55,9 @@ bundle agent cfe_internal_management
     any::
       "bundles" slist => getindices(policy);
 
+      "recommendation_bundles"
+        slist => sort( bundlesmatching( "cfengine_recommendations" ), lex);
+
   methods:
 
       #
@@ -44,6 +66,10 @@ bundle agent cfe_internal_management
 
       "CFEngine_Internals"
         usebundle => "$(bundles)";
+
+      "CFEngine Recommendations"
+        usebundle => $(recommendation_bundles),
+        if => isvariable( recommendation_bunldes );
 
   reports:
     DEBUG|DEBUG_cfe_internal_management::

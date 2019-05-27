@@ -1,4 +1,5 @@
 bundle agent cfe_internal_enterprise_main
+# @brief Drive policy related to CFEngine Enterprise
 {
   methods:
     any::
@@ -33,6 +34,9 @@ bundle agent cfe_internal_enterprise_main
       "hub" usebundle => cfe_internal_php_runalerts,
       handle => "cfe_internal_management_php_runalerts",
       comment => "To run PHP runalerts to check bundle status on SQL and Sketch";
+
+      "Enterprise Maintenance"
+        usebundle => cfe_internal_enterprise_maintenance;
 
     am_policy_hub.enterprise_edition.enable_log_cfengine_enterprise_license_utilization::
 
@@ -71,4 +75,10 @@ bundle agent cfe_internal_enterprise_main
       "any" usebundle => cfe_internal_cleanup_agent_reports,
       handle => "cfe_internal_management_cleanup_agent_reports",
       comment => "Remove accumulated reports if they grow too large in size";
+
+    !windows::
+      "Permissions and Ownership"
+        usebundle => cfe_internal_permissions,
+        comment => "Specific expectations for permissions and ownership for cfengine itself";
+
 }

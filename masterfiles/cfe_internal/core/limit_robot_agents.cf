@@ -28,38 +28,46 @@ bundle agent cfe_internal_limit_robot_agents
       # [agent_expireafter][cf-execd#agent_expireafter] as defined in body executor control
       #
 
-    something_wrong_execd::
+    more_cf_execd_processes_than_expected::
 
       "bin/cf-execd"
-      signals => { "term", "kill" },
-      restart_class => "restart_execd",
-      comment => "When cf-execd comes undone then kill all and restart the process",
-      handle => "cfe_internal_limit_robot_agents_processes_kill_cf_execd";
+        signals => { "term", "kill" },
+        comment => "When cf-execd comes undone then kill all and restart the process",
+        handle => "cfe_internal_limit_robot_agents_processes_kill_cf_execd";
 
-    something_wrong_monitord::
+      "bin/cf-execd" -> { "CFE-2974" }
+        restart_class => "cf_execd_not_running",
+        comment => "If cf-execd isn't running, define a class so that it will be started",
+        handle => "cfe_internal_limit_robot_agents_processes_cf_execd_not_running";
+
+
+    more_cf_monitord_processes_than_expected::
 
       "bin/cf-monitord"
-      signals => { "term", "kill" },
-      restart_class => "restart_monitord",
-      comment => "When cf-monitord comes undone then kill all and restart the process",
-      handle => "cfe_internal_limit_robot_agents_processes_kill_cf_monitord";
+        signals => { "term", "kill" },
+        comment => "When cf-monitord comes undone then kill all matching
+                    process",
+        handle => "cfe_internal_limit_robot_agents_processes_kill_cf_monitord";
 
-      #
+      "bin/cf-monitord" -> { "CFE-2963" }
+        restart_class => "cf_monitord_not_running",
+        handle => "cfe_internal_limit_robot_agents_classify_cf_monitord_not_running",
+        comment => "We want cf-monitord to be running, but in order to avoid
+                    non-convergent promises, this must be separated from the
+                    promise to terminate misbehaving daemons";
 
   commands:
 
-    restart_execd::
+    cf_execd_not_running::
 
       "$(sys.cf_execd)"
       comment => "Restart cf-execd process",
-      classes => kept_successful_command,
       handle => "cfe_internal_limit_robot_agents_commands_restart_cf_execd";
 
-    restart_monitord::
+    cf_monitord_not_running::
 
       "$(sys.cf_monitord)"
       comment => "Restart cf-monitord process",
-      classes => kept_successful_command,
       handle => "cfe_internal_limit_robot_agents_commands_restart_cf_monitord";
 
 }
@@ -67,11 +75,11 @@ bundle agent cfe_internal_limit_robot_agents
 body process_count check_execd(n)
 {
       match_range => "0,$(n)";
-      out_of_range_define => {"something_wrong_execd"};
+      out_of_range_define => {"more_cf_execd_processes_than_expected"};
 }
 
 body process_count check_monitord(n)
 {
       match_range => "0,$(n)";
-      out_of_range_define => {"something_wrong_monitord"};
+      out_of_range_define => {"more_cf_monitord_processes_than_expected"};
 }

@@ -15,6 +15,7 @@
 ##################################################################
 
 bundle common cfe_internal_hub_vars
+# @brief Set hub specific variables
 {
   vars:
 
@@ -23,7 +24,6 @@ bundle common cfe_internal_hub_vars
       "docroot" string => "$(sys.workdir)/httpd/htdocs",
         comment => "Root directory of Enterprise Web interface",
         handle => "cfe_internal_hub_vars_docroot";
-
 
       # TODO Consider tagging these files for file integrity monitoring.
 
@@ -49,6 +49,20 @@ bundle common cfe_internal_hub_vars
       "SSLCertificateKeySize" string => "4096";
       "SSLCertificateDaysValid" string => "3650";
 
+      # Determine the version of PHP that is used
+
+      "php_version"
+        string => ifelse( fileexists( "$(sys.workdir)/httpd/modules/libphp7.so" ), "7",
+                          fileexists( "$(sys.workdir)/httpd/modules/libphp5.so" ), "5",
+                          "UNKNOWN" );
+
+  reports:
+
+    policy_server::
+
+      "ERROR: $(this.bundle): Unable to determine correct PHP version."
+        if => strcmp( $(php_version), "UNKNOWN" );
+
 }
 
 ##################################################################
@@ -59,6 +73,7 @@ bundle common cfe_internal_hub_vars
 ##################################################################
 
 bundle agent cfe_internal_update_folders
+# @brief Ensure that the directory structure exists on the hub for storing packages used in self upgrade
 {
   vars:
 
@@ -140,6 +155,7 @@ bundle agent cfe_internal_update_folders
 ##################################################################
 
 bundle agent cfe_internal_apache_sudoer
+# @brief Ensure that cfapache user can run cf-runagent with elevated privledges
 {
   classes:
 
@@ -169,6 +185,7 @@ bundle agent cfe_internal_apache_sudoer
 #
 
 bundle edit_line apache_sudoer
+# @brief Ensure that the cfapache user can run cf-runagent as root without a password
 {
   insert_lines:
 
@@ -241,7 +258,7 @@ bundle agent cfe_internal_php_runalerts
 
       "systemd_supervised"
         scope => "bundle",
-        expression => "systemd.!(cfengine_3_6|cfengine_3_7|cfengine_3_8|cfengine_3_9)",
+        expression => "systemd.!(cfengine_3_7|cfengine_3_8|cfengine_3_9)",
         comment => "As of 3.10 the runalerts service is supervised by systemd
                     when available. Prior to 3.10 the service is supervised
                     directly by CFEngine policy.";
@@ -272,6 +289,7 @@ bundle agent cfe_internal_php_runalerts
       create => "true",
       perms => mog("0755","root","root"),
       edit_template => "$(this.promise_dirname)/templates/runalerts.php.mustache",
+      classes => results( "bundle", "runalerts_script" ),
       template_method => "mustache";
 
 
@@ -319,16 +337,18 @@ bundle agent cfe_internal_php_runalerts
                     and replaced with the php version of the loop.",
         signals => { "kill" };
 
-    # Make sure to kill script on non active hub(s).
-    stale_runalerts_timestamp_repaired|passive_ha_hub::
+    # Make sure to kill script on non active hub(s), when the tracking timestamp
+    # is stale, or when the script has been repaired.
+
+    stale_runalerts_timestamp_repaired|passive_ha_hub|runalerts_script_repaired::
 
       "$(runalerts_script)"
-      comment => "The runalerts process should be killed if it has failed to
-                  update the timestamp files in $(stale_time) minutes or if it
-                  is running on an standby HA hub.",
-      handle => "cfe_internal_php_runalerts_process_kill_php_runalerts_script",
-      signals => { "term" },
-      classes => if_repaired("run_script");
+        comment => "The runalerts process should be killed if it has failed to
+                    update the timestamp files in $(stale_time) minutes or if it
+                    is running on an standby HA hub.",
+        handle => "cfe_internal_php_runalerts_process_kill_php_runalerts_script",
+        signals => { "term" },
+        classes => if_repaired("run_script");
 
 
     # We don't try to supervise the runalerts process on systemd hosts because
@@ -376,6 +396,7 @@ body action cfe_internal_bg
       #
 
 body file_select mins_old(mins)
+# @brief Select files that are older than `mins` minutes old
 {
  mtime       => irange(0,ago(0,0,0,0,"$(mins)",0));
  file_result => "mtime";
@@ -383,17 +404,17 @@ body file_select mins_old(mins)
 
 bundle agent cfe_internal_truncate_events
 #@brief cancel all the pending events once in a day
-
 {
   commands:
     Hr05.Min00_05::
       "$(sys.workdir)/httpd/php/bin/php $(cfe_internal_hub_vars.docroot)/index.php cli_tasks truncate_events"
-      comment => "Turncate all the pending notifications if there is any",
-      classes => kept_successful_command,
+      contain => silent,
+      comment => "Truncate all the pending notifications if there is any",
       handle  => "cfe_internal_truncate_event_mp";
 }
 
 bundle agent cfe_internal_purge_scheduled_reports_older_than_days(days)
+# @brief Clean up scheduled reports older than `days` days old
 {
   files:
     "$(cfe_internal_hub_vars.docroot)/tmp/."
@@ -419,22 +440,24 @@ bundle agent log_cfengine_enterprise_license_utilization
 # @brief Log the number of hosts seen within the last 24 hours and the number of
 # hosts reported to have the "cfengine" class. Note any hosts that has been
 # successfully collected from is expected to have the "cfengine" class. This
-# policy will not do anything unless the class
+# bundle will not be called unless the class
 # `enable_log_cfengine_enterprise_license_utilization` is defined.
 {
   reports:
 
-    policy_server.enterprise_edition.(DEBUG|DEBUG_log_cfengine_enterprise_license_utilization|inform_mode)::
+    policy_server.enterprise_edition.DEBUG_log_cfengine_enterprise_license_utilization::
 
       "Hosts reported: $(count_reporting)";
 
   vars:
 
-      "log_frequency" int => "720";
-
-    policy_server.enterprise_edition.enable_log_cfengine_enterprise_license_utilization::
+    policy_server.enterprise_edition::
 
       "log_dir" string => "$(sys.workdir)/log";
+
+    policy_server.enterprise_edition.enable_log_cfengine_enterprise_license_utilization.(DEBUG_log_cfengine_enterprise_license_utilization|!cfe_internal_logged_utilization)::
+
+      "log_frequency" int => "720";
 
       # Using address for reporting hosts because hostseen() will incur
       # undesirable reverse dns lookups if name is used
@@ -450,23 +473,140 @@ bundle agent log_cfengine_enterprise_license_utilization
 
   files:
 
-    policy_server.enterprise_edition.enable_log_cfengine_enterprise_license_utilization::
+    policy_server.enterprise_edition::
       "$(log_dir)/."
         create => "true",
         comment => "The log dir must exist in order to write to a file.";
 
   reports:
 
-    policy_server.enterprise_edition.enable_log_cfengine_enterprise_license_utilization::
+    policy_server.enterprise_edition.!cfe_internal_logged_utilization::
 
       "$(sys.date), hosts_reporting=$(count_reporting), hosts_seen=$(count_seen)"
         report_to_file => "$(sys.workdir)/log/license_utilization.log",
-        if => not("cfe_internal_logged_utilization"),
         classes => cfe_internal_log_utilization($(log_frequency));
 
-    policy_server.enterprise_edition.!enable_log_cfengine_enterprise_license_utilization::
+}
 
-      "WARNING $(this.bundle) is actuated but not enabled. enable_$(this.bundle) is not defined.";
+bundle agent cfe_internal_enterprise_maintenance
+# @brief Actuate bundles tagged with `enterprise_maintenance` in lexically sorted order
+{
+  vars:
+
+    enterprise_edition::
+
+      "enterprise_maintenance_bundles_unsorted"
+        slist => bundlesmatching(".*", "enterprise_maintenance");
+
+      "enterprise_maintenance_bundles"
+        slist => sort( enterprise_maintenance_bundles_unsorted,
+                       lex);
+
+      "enterprise_maintenance_bundle_count"
+        int => length( enterprise_maintenance_bundles );
+
+  methods:
+
+      "Enterprise Maintenance"
+        usebundle => $(enterprise_maintenance_bundles),
+        ifvarclass => isgreaterthan( $(enterprise_maintenance_bundle_count), 0 );
+
+  reports:
+
+    "DEBUG|DEBUG_$(this.bundle)"::
+
+      "DEBUG $(this.bundle): $(enterprise_maintenance_bundle_count) CFEngine Enterprise Maintenance Bundles"
+        ifvarclass => isgreaterthan( $(enterprise_maintenance_bundle_count), 0 );
+
+      "DEBUG $(this.bundle): $(enterprise_maintenance_bundles) CFEngine Enterprise Maintenance Bundles"
+        ifvarclass => isgreaterthan( $(enterprise_maintenance_bundle_count), 0 );
+}
+
+bundle agent cfe_internal_refresh_inventory_view
+# @brief Refresh materialized view every 5 minutes
+{
+  meta:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "tags" slist => { "enterprise_maintenance" };
+
+  commands:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "$(sys.workdir)/httpd/php/bin/php"
+        args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks inventory_refresh",
+        contain => silent,
+        comment => "This refreshes the inventory view. If the inventory view is not refreshed then it will contain stale data.",
+        handle  => "mpf_fresh_inventory_view",
+        if => isdir( "$(cfe_internal_hub_vars.docroot)/api/modules/inventory" );
+
+}
+
+bundle agent cfe_internal_refresh_hosts_view
+# @brief Refresh hosts materialized view every 5 minutes
+{
+  meta:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "tags" slist => { "enterprise_maintenance" };
+
+  commands:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "$(sys.workdir)/httpd/php/bin/php" -> { "ENT-3482" }
+        args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks materialized_hosts_view_refresh",
+        contain => silent,
+        comment => "This refreshes the hosts view. If the hosts view is not refreshed then it will contain stale data.",
+        handle  => "mpf_fresh_hosts_view",
+        if => isgreaterthan(countlinesmatching(".*materialized_hosts_view_refresh.*", "$(cfe_internal_hub_vars.docroot)/application/controllers/Cli_tasks.php"), 0);
+
+}
+
+bundle agent cfe_internal_clear_last_seen_hosts_logs
+# @brief Clear last seen hosts log every 5 minutes
+{
+  meta:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "tags" slist => { "enterprise_maintenance" };
+
+  commands:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "$(sys.workdir)/httpd/php/bin/php" -> { "ENT-3550" }
+        args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks clearLastSeenHostsLogs",
+        contain => silent,
+        comment => "This clears the __lastseenhostslogs table. If the __lastseenhostslogs table is not cleared then it will contain unnecessary data.",
+        handle  => "mpf_clear_lastseenhostslogs",
+        if => isgreaterthan(countlinesmatching(".*clearLastSeenHostsLogs.*", "$(cfe_internal_hub_vars.docroot)/application/controllers/Cli_tasks.php"), 0);
+
+}
+
+bundle agent cfe_internal_refresh_events_table
+# @brief Refresh materialized view every 5 minutes
+{
+  meta:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "tags" slist => { "enterprise_maintenance" };
+
+  commands:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "$(sys.workdir)/httpd/php/bin/php"
+        args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks process_api_events",
+        contain => silent,
+        comment => "This refreshes the events table. If the events table is not refreshed then it will contain stale data.",
+        handle  => "mpf_fresh_events_table",
+        if => fileexists( "$(cfe_internal_hub_vars.docroot)/api/resource-v1/Event.php" );
 }
 
 body classes cfe_internal_log_utilization(time)
