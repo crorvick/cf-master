@@ -1,0 +1,18 @@
+bundle agent edit_portage_repos
+{
+  vars:
+      "repo" slist => { "gentoo", "crorvick" };
+
+  files:
+    !ipv4_10_0_0_1::
+      "/etc/portage/repos.conf/$(repo).conf"
+        create => "true",
+        perms => mog("0644", "root", "root"),
+        edit_template => "$(sys.inputdir)/templates/etc/portage/repos.conf/$(repo).conf.mustache",
+        template_method => "mustache",
+        template_data => parsejson('
+          {
+            "sync_uri" : "rsync://10.0.0.1/$(repo)-portage"
+          }
+        ');
+}
