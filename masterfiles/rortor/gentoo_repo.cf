@@ -1,0 +1,17 @@
+bundle agent edit_gentoo_repo
+{
+  vars:
+      "gentoo_repo" string => "/etc/portage/repos.conf/gentoo.conf";
+
+  files:
+    !ipv4_10_0_0_1::
+      "$(motd)"
+        create => "true",
+        edit_template => "$(sys.inputdir)/templates$(gentoo_repo).mustache",
+        template_method => "mustache",
+        template_data => parsejson('
+          {
+            "sync_uri" : "rsync://10.0.0.1/gentoo-portage"
+          }
+        ');
+}

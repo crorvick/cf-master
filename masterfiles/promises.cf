@@ -30,6 +30,7 @@ body common control
 
                           edit_motd,
                           edit_configfiles,
+                          edit_gentoo_repo,
 
       };
 
@@ -60,6 +61,7 @@ body common control
 
                   "rortor/motd.cf",
                   "rortor/configfiles.cf",
+                  "rortor/gentoo_repo.cf",
       };
 
       version => "CFEngine Promises.cf 3.10.5";
