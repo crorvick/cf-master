@@ -1,0 +1,22 @@
+bundle agent edit_motd
+{
+  vars:
+      "motd" string => "/etc/motd";
+
+  files:
+      "$(motd)"
+        create => "true",
+        edit_template => "$(sys.inputdir)/templates$(motd).mustache",
+        template_method => "mustache",
+        template_data => parsejson('
+          {
+            "cf_version"      : "$(sys.cf_version)",
+            "fqdn"            : "$(sys.fqhost)",
+            "kernel_version"  : "$(sys.release)",
+            "ipv4"            : "$(sys.ipv4[eth0])",
+            "ipv6"            : "$(sys.inet6[addresses][eth0][address])",
+            "last_update"     : "$(sys.last_policy_update)",
+            "num_cpus"        : "$(sys.cpus)"
+          }
+        ');
+}

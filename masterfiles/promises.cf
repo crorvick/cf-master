@@ -28,7 +28,7 @@ body common control
                           @(cfengine_enterprise_hub_ha.management_bundles),
                           @(def.bundlesequence_end),
 
-			  edit_motd,
+                          edit_motd,
 
       };
 
@@ -56,7 +56,8 @@ body common control
                   @(services_autorun.inputs),
 
                   "services/main.cf",
-		  "motd.cf",
+
+                  "rortor/motd.cf",
       };
 
       version => "CFEngine Promises.cf 3.10.5";
