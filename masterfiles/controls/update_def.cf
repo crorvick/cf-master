@@ -12,7 +12,7 @@ bundle common update_def
     any::
       "sys_policy_hub_port_exists" expression => isvariable("sys.policy_hub_port");
   vars:
-      "current_version" string => "3.10.5";
+      "current_version" string => "3.12.2";
 
     !feature_def_json_preparse::
       "augments_file" string => "$(this.promise_dirname)/../../def.json";
@@ -31,6 +31,37 @@ bundle common update_def
       "augments_classes_data_keys" slist => getindices("augments_classes_data");
 
     any::
+
+      # MPF Controls
+
+      # Because in some versions of cfengine bundlesequence in body common
+      # control does not support does not support iteration over data containers
+      # we must first pick out the bundles into a shallow container that we can
+      # then get a regular list from using getvalues().
+
+      "tbse" data => mergedata( "def.control_common_update_bundlesequence_end" );
+
+      # Since we have @(def.update_bundlesequence_end) in body common control
+      # bundlesequence we must have a list variable defined. It can be empty, but it
+      # must be defined. If it is not defined the agent will error complaining
+      # that '@(def.bundlesequence_end) is not a defined bundle.
+
+      # As noted in CFE-2460 getvalues behaviour varies between versions. 3.7.x
+      # getvalues will return an empty list when run on a non existant data
+      # container.  On 3.9.1 it does not return an empty list.
+      # So we initialize it as an empty list first to be safe.
+
+      "bundlesequence_end" slist => {};
+      "bundlesequence_end" slist => getvalues( tbse );
+
+      "augments_inputs"
+        slist => {},
+        ifvarclass => not( isvariable( "def.update_inputs" ) );
+
+      "augments_inputs"
+        slist => { @(def.update_inputs) },
+        ifvarclass => isvariable( "def.update_inputs" );
+
       # Begin change
 
       # When parsing the augments_file from policy, we set input_name_patterns
@@ -97,6 +128,25 @@ bundle common update_def
       comment => "Group that CFEngine Enterprise webserver runs as",
       handle => "common_def_vars_cf_cfapache_group";
 
+
+      # Hubs get the explicit path because they perform local copies (especially
+      # during bootstrap) when cf-serverd may not be available. Else we use the
+      # "masterfiles" shortcut.
+
+      "mpf_update_policy_master_location" -> { "ENT-3692" }
+        string => ifelse( "am_policy_hub", "/var/cfengine/masterfiles",
+                          "masterfiles");
+
+      # Here we allow the masterfiles location to be overridden via augments. If
+      # augments overides the value, use that. Note: Since hubs do not perform
+      # copies to themselves over cf-serverd, this should be a fully qualified
+      # path or special considerations must be made for hub bootstrapping.
+
+      "mpf_update_policy_master_location" -> { "ENT-3692" }
+        comment => "Directory where clients should get policy from.",
+        string => "$(def.mpf_update_policy_master_location)",
+        if => isvariable( "def.mpf_update_policy_master_location" );
+
     # enable_cfengine_enterprise_hub_ha is defined below
     # Disabled by default
 
@@ -106,6 +156,18 @@ bundle common update_def
 
     !enable_cfengine_enterprise_hub_ha::
       "policy_servers" slist => {"$(sys.policy_hub)"};
+
+    any::
+
+      "control_common_ignore_missing_bundles" -> { "CFE-2773" }
+        string => ifelse( strcmp( $(control_common_ignore_missing_bundles), "true" ),
+                          "true",
+                          "false");
+
+      "control_common_ignore_missing_inputs" -> { "CFE-2773" }
+        string => ifelse( strcmp( $(control_common_ignore_missing_inputs), "true" ),
+                          "true",
+                          "false");
 
   classes:
 
@@ -172,6 +234,13 @@ bundle common update_def
 
       # Enable failover to node which is outside cluster
       #"failover_to_replication_node_enabled" expression => "enterprise_edition";
+
+    any::
+      # TODO Remove from MPF after 3.12 EOL
+      "cfredis_in_enterprise"  -> { "ENT-2797" }
+        or => { "cfengine_3_7", "cfengine_3_8", "cfengine_3_9", "cfengine_3_10", "cfengine_3_11" };
+      "cfconsumer_in_enterprise"  -> { "ENT-2797" }
+        or => { "cfengine_3_7", "cfengine_3_8", "cfengine_3_9", "cfengine_3_10", "cfengine_3_11" };
 
   reports:
     DEBUG|DEBUG_update_def::
