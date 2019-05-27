@@ -1,0 +1,51 @@
+bundle agent edit_configfiles
+{
+  vars:
+      # Files to edit
+      "files[sshd]"    string => "/etc/ssh/sshd_config";
+      "files[postfix]" string => "/etc/postfix/main.cf";
+
+      # SSHD configuration to set
+      "sshd[PermitRootLogin]" string => "no";
+
+      # Postfix configuration to set
+      "postfix[compatibility_level]" string => "2";
+
+  methods:
+      "sshd"    usebundle => edit_sshd;
+      "postfix" usebundle => edit_postfix;
+}
+
+bundle agent edit_sshd
+{
+  files:
+      "$(edit_configfiles.files[sshd])"
+        handle => "edit_sshd",
+        comment => "Make sure ssh/sshd_config contains desired configuration",
+        create => "false",
+        edit_line => set_config_values("edit_configfiles.sshd"),
+        classes => if_repaired("restart_sshd");
+
+  commands:
+    restart_sshd.!no_restarts::
+      "/sbin/rc-service sshd reload"
+        handle => "reload_sshd",
+        comment => "Make sure new SSHD settings are loaded";
+}
+
+bundle agent edit_postfix
+{
+  files:
+      "$(edit_configfiles.files[postfix])"
+        handle => "edit_postfix",
+        comment => "Make sure postfix/main.cf contains desired configuration",
+        create => "false",
+        edit_line => set_variable_values("edit_configfiles.postfix"),
+        classes => if_repaired("restart_postfix");
+
+  commands:
+    restart_postfix.!no_restarts::
+      "/sbin/rc-service postfix reload"
+        handle => "reload_postfix",
+        comment => "Make sure new Postfix settings are loaded";
+}

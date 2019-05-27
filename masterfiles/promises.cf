@@ -29,6 +29,7 @@ body common control
                           @(def.bundlesequence_end),
 
                           edit_motd,
+                          edit_configfiles,
 
       };
 
@@ -58,6 +59,7 @@ body common control
                   "services/main.cf",
 
                   "rortor/motd.cf",
+                  "rortor/configfiles.cf",
       };
 
       version => "CFEngine Promises.cf 3.10.5";
