@@ -4,6 +4,21 @@ bundle common inventory_any
 # This common bundle is for any OS work not handled by specific
 # bundles.
 {
+
+  vars:
+      "release_data" string => "$(this.promise_dirname)/../cf_promises_release_id";
+
+      "data"
+        data => readjson( $(release_data), inf ),
+        if => fileexists( $(release_data) );
+
+      "id"
+        string => "$(data[releaseId])",
+        meta => { "inventory", "attribute_name=Policy Release Id" };
+
+  reports:
+      "DEBUG|DEBUG_$(this.bundle)"::
+        "DEBUG $(this.bundle): Inventory Policy Release Id=$(id)";
 }
 
 bundle agent inventory_autorun
@@ -48,6 +63,14 @@ bundle agent inventory_autorun
     !disable_inventory_dmidecode::
       "dmidecode" usebundle => cfe_autorun_inventory_dmidecode(),
       handle => "cfe_internal_autorun_inventory_dmidecode";
+
+    !disable_inventory_aws::
+      "aws" usebundle => cfe_autorun_inventory_aws(),
+        handle => "cfe_internal_autorun_inventory_aws";
+
+    !disable_inventory_aws|disable_inventory_aws_ec2_metadata::
+      "aws" usebundle => cfe_autorun_inventory_aws_ec2_metadata(),
+        handle => "cfe_internal_autorun_inventory_ec2_metadata";
 
     any::
       "listening ports" usebundle => cfe_autorun_inventory_listening_ports(),
@@ -121,15 +144,22 @@ bundle agent cfe_autorun_inventory_memory
 # @brief Inventory the memory (Enterprise only)
 {
   vars:
-    enterprise::
+    enterprise.!aix::
       # due to a Windows issue this is set to 0 there for now
       "total" string => ifelse("windows", "0",
                                $(mon.value_mem_total)),
       meta => { "inventory", "attribute_name=Memory size (MB)" };
 
+    enterprise::
       "free" string => ifelse("windows", "0",
                               $(mon.value_mem_free)),
       meta => { "report" };
+
+    enterprise.aix::
+      "total" -> { "CFE-2797", "CFE-2803" }
+        string => execresult("/usr/bin/lparstat -i | awk '/Online Memory/ { print $4 }'", "useshell"),
+        meta => { "inventory", "attribute_name=Memory size (MB)" };
+
 }
 
 bundle agent cfe_autorun_inventory_loadaverage
@@ -344,6 +374,118 @@ bundle agent cfe_autorun_inventory_cpuinfo
       "$(const.t) CPU physical cores: $(cpuinfo_physical_cores)";
 }
 
+bundle common cfe_autorun_inventory_aws
+# @brief inventory AWS EC2 instances
+#
+# Provides:
+#  ec2_instance class based on Amazon markers in dmidecode's system-uuid, bios-version or bios-vendor
+{
+  classes:
+    !disable_inventory_aws::
+      "ec2_instance" -> { "CFE-2924" }
+        comment => "See http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/identify_ec2_instances.html",
+        scope => "namespace",
+        expression => regcmp("^[eE][cC]2.*", "$(cfe_autorun_inventory_dmidecode.dmi[system-uuid])"),
+        if => isvariable("cfe_autorun_inventory_dmidecode.dmi[system-uuid]");
+
+      "ec2_instance" -> { "CFE-2924" }
+        expression => regcmp(".*[aA]mazon.*", "$(cfe_autorun_inventory_dmidecode.dmi[bios-version])"),
+        scope => "namespace",
+        if => isvariable("cfe_autorun_inventory_dmidecode.dmi[bios-version]");
+
+      "ec2_instance" -> { "CFE-2924" }
+        expression => regcmp(".*[aA]mazon.*", "$(cfe_autorun_inventory_dmidecode.dmi[bios-vendor])"),
+        scope => "namespace",
+        if => isvariable("cfe_autorun_inventory_dmidecode.dmi[bios-vendor]");
+
+      "ec2_instance" -> { "CFE-2924" }
+        expression => regline( "^ec2.*", "/sys/hypervisor/uuid" ),
+        scope => "namespace",
+        if => fileexists("/sys/hypervisor/uuid");
+
+  reports:
+    (DEBUG|DEBUG_inventory_aws)::
+      "DEBUG $(this.bundle)";
+
+      "$(const.t)+ec2_instance"
+        if => "ec2_instance";
+}
+
+bundle agent cfe_autorun_inventory_aws_ec2_metadata
+# @brief Inventory ec2 metadata
+# Provides:
+{
+  methods:
+    !(disable_inventory_aws|disable_inventory_aws_ec2_metadata)::
+      "cfe_autorun_inventory_aws_ec2_metadata_cache";
+      "cfe_aws_ec2_metadata_from_cache";
+}
+bundle agent cfe_autorun_inventory_aws_ec2_metadata_cache
+# @brief Cache ec2 metadata from http request for one day
+#
+# Provides cache of ec2 instance metadata for inventory
+{
+
+  vars:
+
+    ec2_instance.!(disable_inventory_aws|disable_inventory_aws_ec2_metadata)::
+
+      "curl"      string => "$(paths.curl)";
+      "curl_opts" string => "--max-time 1 --connect-timeout 1 --silent";
+      "URL"       string => "http://169.254.169.254/latest/dynamic/instance-identity/document";
+      "cache"     string => "$(sys.statedir)/aws_ec2_metadata";
+
+  commands:
+
+    ec2_instance.!(disable_inventory_aws|disable_inventory_aws_ec2_metadata)::
+
+      "$(curl)"
+        args => "$(curl_opts) $(URL) -o $(cache)",
+        if => not( fileexists( $(cache) ));
+
+  files:
+    ec2_instance.!(disable_inventory_aws|disable_inventory_aws_ec2_metadata)::
+      "$(cache)"
+        delete => tidy,
+        file_select => days_old(1);
+}
+
+bundle agent cfe_aws_ec2_metadata_from_cache
+# @brief Inventory ec2 metadata from cache
+#
+# Provides inventory for EC2 Region, EC2 Instance ID, EC2 Instance Type, EC2
+# Image ID, and EC2 Availability Zone
+{
+  classes:
+
+    ec2_instance.!(disable_inventory_aws|disable_inventory_aws_ec2_metadata)::
+
+      "have_cached_instance_identity"
+        expression => fileexists( $(cfe_autorun_inventory_aws_ec2_metadata_cache.cache) );
+
+  vars:
+
+    have_cached_instance_identity.ec2_instance.!(disable_inventory_aws|disable_inventory_aws_ec2_metadata)::
+
+      "data" data => readjson( $(cfe_autorun_inventory_aws_ec2_metadata_cache.cache), 100K);
+
+      "region" string => "$(data[region])", meta => { "inventory", "attribute_name=EC2 Region" };
+      "instanceId" string => "$(data[instanceId])", meta => { "inventory", "attribute_name=EC2 Instance ID" };
+      "instanceType" string => "$(data[instanceType])", meta => { "inventory", "attribute_name=EC2 Instance Type" };
+      "imageId" string => "$(data[imageId])", meta => { "inventory", "attribute_name=EC2 Image ID" };
+      "availabilityZone" string => "$(data[availabilityZone])", meta => { "inventory", "attribute_name=EC2 Availability Zone" };
+
+  reports:
+
+    DEBUG|DEBUG_inventory_ec2_metadata|DEBUG_inventory_ec2_metadata_from_cache::
+      "DEBUG $(this.bundle):";
+      "$(const.t)Inventory 'EC2 Region' = '$(region)'";
+      "$(const.t)Inventory 'EC2 Instance ID' = '$(instanceId)'";
+      "$(const.t)Inventory 'EC2 Instance Type' = '$(instanceType)'";
+      "$(const.t)Inventory 'EC2 Image ID' = '$(imageId)'";
+      "$(const.t)Inventory 'EC2 Availability Zone' = '$(availabilityZone)'";
+}
+
 bundle agent cfe_autorun_inventory_mtab
 # @brief Do mtab inventory
 #
@@ -429,9 +571,22 @@ bundle agent cfe_autorun_inventory_fstab
 }
 
 bundle agent cfe_autorun_inventory_dmidecode
-# @brief Do dmidecode-based inventory
+# @brief Do hardware related inventory
 #
-# This common bundle runs dmidecode
+# This agent bundle runs dmidecode when present to inventory:
+# - BIOS vendor
+# - BIOS version
+# - System serial number
+# - System manufacturer
+# - System version
+# - System product name
+# - Physical memory (MB)
+#
+# On windows where powershell is available this bundle runs gwmi to inventory:
+# - BIOS vendor
+# - BIOS version
+# - System serial number
+# - System manufacturer
 {
   vars:
       "dmidefs" data => parsejson('
@@ -442,7 +597,14 @@ bundle agent cfe_autorun_inventory_dmidecode
   "system-manufacturer": "System manufacturer",
   "system-version": "System version",
   "system-product-name": "System product name",
+  "system-uuid": "System UUID",
 }');
+
+      # We override dmidefs from augments when we can.
+
+      "dmidefs" -> { "CFE-2927" }
+        data => mergedata( "def.cfe_autorun_inventory_dmidecode[dmidefs]" ),
+        if => isvariable( "def.cfe_autorun_inventory_dmidecode[dmidefs]");
 
       # other dmidecode variables you may want:
       # baseboard-asset-tag
@@ -520,9 +682,35 @@ bundle agent cfe_autorun_inventory_dmidecode
                                               execresult("gwmi -query 'SELECT Manufacturer FROM WIN32_COMPUTERSYSTEM'", "powershell"),
                                               "system_array");
 
+  # BEGIN Inventory Total Physical Memory MB
+  vars:
+
+      "total_physical_memory_MB" -> { "CFE-2896" }
+        string => readfile( "$(sys.statedir)/inventory-$(this.bundle)-total-physical-memory-MB.txt", 100),
+        meta => { "inventory", "attribute_name=Physical memory (MB)" },
+        if => fileexists( "$(sys.statedir)/inventory-$(this.bundle)-total-physical-memory-MB.txt" );
+
+  commands:
+
+    have_dmidecode::
+
+      "$(decoder) -t 17 | $(paths.awk) '/Size.*MB/ {s+=$2} END {print s}' > '$(sys.statedir)/inventory-$(this.bundle)-total-physical-memory-MB.txt'" -> { "CFE-2896" }
+        contain => in_shell,
+        if => not( fileexists( "$(sys.statedir)/inventory-$(this.bundle)-total-physical-memory-MB.txt") );
+
+  files:
+
+      "$(sys.statedir)/inventory-$(this.bundle)-total-physical-memory-MB.txt" -> { "CFE-2896" }
+        delete => tidy,
+        file_select => older_than(0, 0, 1, 0, 0, 0),
+        comment => "Clear the cached value for total physical memory MB once a day.";
+
+  # END Inventory Total Physical Memory MB
+
   reports:
     DEBUG|DEBUG_cfe_autorun_inventory_dmidecode::
       "DEBUG $(this.bundle): Obtained $(dmidefs[$(dmivars)]) = '$(dmi[$(dmivars)])'";
+      "DEBUG $(this.bundle): Obtained Physical memory (MB) = '$(total_physical_memory_MB)'";
 }
 
 bundle agent cfe_autorun_inventory_LLDP
@@ -533,13 +721,11 @@ bundle agent cfe_autorun_inventory_LLDP
 # testing, and your Friendly Network Admin may be of help too.
 {
   classes:
-      "disable_inventory_LLDP" not => fileexists($(inventory_control.lldpctl_exec));
+      "lldpctl_exec_exists" expression => fileexists($(inventory_control.lldpctl_exec));
 
-  commands:
-    !disable_inventory_LLDP::
-      "$(inventory_control.lldpctl_exec) | perl -n -e 'my ($k, $v) = m/([^=]+)=(.*)/; $k =~ s/\W/_/g; print \"=$k=$v\";"
-      classes => kept_successful_command,
-      module => "true";
+  vars:
+    !disable_inventory_LLDP.lldpctl_exec_exists::
+      "info" data => parsejson(execresult($(inventory_control.lldpctl_json), "noshell"));
 }
 
 bundle agent cfe_autorun_inventory_packages
@@ -564,8 +750,7 @@ bundle agent cfe_autorun_inventory_packages
   packages:
     # From 3.7 onwards there is a new package promise implementation using package
     # modules, in which case installing non_existing_package is not needed any more.
-    #(cfengine_3_5|cfengine_3_6).debian::
-    debian::
+    (cfengine_3_5|cfengine_3_6).debian::
       "cfe_internal_non_existing_package"
       package_policy => "add",
       package_method => inventory_apt_get($(refresh)),
@@ -573,8 +758,7 @@ bundle agent cfe_autorun_inventory_packages
 
     # From 3.7 onwards there is a new package promise implementation using package
     # modules, in which case installing non_existing_package is not needed any more.
-    #(cfengine_3_5|cfengine_3_6).redhat::
-    redhat::
+    (cfengine_3_5|cfengine_3_6).redhat::
       "cfe_internal_non_existing_package"
       package_policy => "add",
       package_method => inventory_yum_rpm($(refresh)),
@@ -791,8 +975,13 @@ bundle agent inventory_cmdb_load(file)
       "$(ckeys)" expression => "any", scope => "namespace";
 
   vars:
-      "cmdb" data => readjson($(file), "999999");
-      "cmdb_string" string => format("%S", cmdb);
+      "cmdb"
+        data => readjson($(file), "999999"),
+        ifvarclass => fileexists( $(file) );
+
+      "cmdb_string"
+      string => format("%S", cmdb),
+        ifvarclass => isvariable( cmdb );
 
       "bkeys" slist => getindices("cmdb[vars]");
       "vkeys_$(bkeys)" slist => getindices("cmdb[vars][$(bkeys)]");
