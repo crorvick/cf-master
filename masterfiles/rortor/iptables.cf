@@ -1,0 +1,20 @@
+bundle agent edit_iptables
+{
+  vars:
+      "iptables" slist => { "iptables", "ip6tables" };
+
+  files:
+      "/var/lib/$(iptables)/rules-save"
+        create => "true",
+        edit_template => "$(sys.inputdir)/templates/var/lib/$(iptables)/rules-save.mustache",
+        template_method => "mustache",
+        template_data => parsejson('
+          {
+          }
+        '),
+        classes => if_repaired("reload_$(iptables)");
+
+  commands:
+    "/sbin/rc-service $(iptables) reload"
+      ifvarclass => "reload_$(iptables)";
+}

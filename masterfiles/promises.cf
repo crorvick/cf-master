@@ -31,6 +31,7 @@ body common control
                           edit_motd,
                           edit_configfiles,
                           edit_portage_repos,
+                          edit_iptables,
 
       };
 
@@ -62,6 +63,7 @@ body common control
                   "rortor/motd.cf",
                   "rortor/configfiles.cf",
                   "rortor/portage_repos.cf",
+                  "rortor/iptables.cf",
       };
 
       version => "CFEngine Promises.cf 3.12.2";
