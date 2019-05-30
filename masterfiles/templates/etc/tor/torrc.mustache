@@ -1,0 +1,14 @@
+User tor
+PIDFile /var/run/tor/tor.pid
+Log notice syslog
+DataDirectory /var/lib/tor/data
+
+%include /etc/tor/nickname
+%include /etc/tor/family.d
+
+ORPort 9001
+ORPort [{{ipv6}}]:9001
+DirPort 9030
+ExitRelay 0
+BandwidthRate 20 MBits
+ContactInfo rortor@rorvick.com

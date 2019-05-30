@@ -1,0 +1,24 @@
+bundle agent edit_tor
+{
+  vars:
+      "torrc" string => "/etc/tor/torrc";
+
+  files:
+      "$(torrc)"
+        create => "true",
+        edit_template => "$(sys.inputdir)/templates$(torrc).mustache",
+        template_method => "mustache",
+        template_data => parsejson('
+          {
+            "fqdn"            : "$(sys.fqhost)",
+            "ipv4"            : "$(sys.ipv4[eth0])",
+            "ipv6"            : "$(sys.inet6[addresses][eth0][address])"
+          }
+        '),
+        classes => if_repaired("restart_tor");
+
+  commands:
+    restart_tor.!no_restarts::
+      "/sbin/rc-service tor restart"
+        handle => "restart_tor";
+}
