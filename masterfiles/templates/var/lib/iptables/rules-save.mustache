@@ -3,10 +3,10 @@
 :FORWARD DROP [0:0]
 :OUTPUT ACCEPT [0:0]
 -A INPUT -i lo -j ACCEPT
+-A INPUT -i wg0 -j ACCEPT
 -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 -A INPUT -p udp --dport 60000:61000 -j ACCEPT
 -A INPUT -p tcp -m conntrack --ctstate NEW -m multiport --dports 22,9001,9030 -j ACCEPT
 -A INPUT -p udp -m conntrack --ctstate NEW --dport 28262 -j ACCEPT
--A INPUT ! -i eth0 -p tcp -m conntrack --ctstate NEW -m multiport --dports 873,5308,6817,6818 -j ACCEPT
 -A INPUT -p icmp --icmp-type echo-request -j ACCEPT
 COMMIT
