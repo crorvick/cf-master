@@ -5,6 +5,7 @@
 ###############################################################################
 
 body common control
+# @brief Common control attributes for all components
 {
       bundlesequence => {
                           "update_def",
@@ -24,7 +25,6 @@ body common control
                   "cfe_internal/update/systemd_units.cf",
                   @(cfengine_update_controls.update_def_inputs),
                   "cfe_internal/update/cfe_internal_dc_workflow.cf",
-                  "cfe_internal/update/cfe_internal_local_git_remote.cf",
                   "cfe_internal/update/cfe_internal_update_from_repository.cf",
                   "cfe_internal/update/update_policy.cf",
                   "cfe_internal/update/update_processes.cf",
@@ -39,6 +39,7 @@ body common control
 
 #############################################################################
 bundle common cfengine_update_controls
+# @brief Resolve other controls necessary for update
 {
   vars:
        "update_def_inputs"
@@ -136,13 +137,14 @@ bundle agent cfengine_internal_standalone_self_upgrade_execution
 
   reports:
 
-    inform_mode|verbose_mode|DEBUG|DEBUG_cfengine_internal_standalone_self_upgrade::
+    trigger_upgrade.(inform_mode|verbose_mode|DEBUG|DEBUG_cfengine_internal_standalone_self_upgrade)::
       "Skipped self upgrade because we are running the desired version $(sys.cf_version)" -> { "ENT-3592" }
         if => "at_desired_version";
 
 }
 
 body agent control
+# @brief Agent controls for update
 {
       ifelapsed => "1";
       skipidentify => "true";

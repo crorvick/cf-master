@@ -1,14 +1,24 @@
 bundle agent cfe_internal_core_main
 {
   methods:
+
+    !mpf_auto_am_policy_hub_state_disabled::
+
+      "Verify policy hub state" -> { "CFE-3073" }
+        usebundle => mpf_auto_am_policy_hub_state,
+        if => not( fileexists( "$(sys.statedir)/am_policy_hub" ));
+
     any::
 
 #   NB! On a container host this may kill CFEngine processes inside containers.
 #       See https://dev.cfengine.com/issues/6906
 
+    !mpf_disable_cfe_internal_limit_robot_agents::
       "any" usebundle => cfe_internal_limit_robot_agents,
         handle => "cfe_internal_management_limit_cfe_agents",
         comment => "Manage CFE processes";
+
+    any::
 
       "any"
         usebundle => cfe_internal_log_rotation,
@@ -31,6 +41,20 @@ bundle agent cfe_internal_core_main
 
 }
 
+bundle agent mpf_auto_am_policy_hub_state
+# @brief Ensure that `$(sys.statedir)/am_policy_hub` file is present when expected
+{
+  files:
+
+      # We think we are a policy hub if the policy server (the host you
+      # bootstrapped to) resolves to an IP found on the host. This is intended
+      # to prevent accidental removal of the am_policy_hub state file.
+
+      "$(sys.statedir)/am_policy_hub"
+        create => "true",
+        if => some( escape( $(sys.policy_server) ), @(sys.ipaddresses) );
+
+}
 bundle agent mpf_augments_control
 # @brief Restart cfenigne components when one of the control variables has changed.
 #
@@ -164,12 +188,6 @@ bundle agent mpf_augments_control
        #    if => "(execd_controls_repaired|runagent_controls_repaired)";
 
 @endif
-
-  reports:
-
-    cfengine_3_7|cfengine_3_8|cfengine_3_9::
-      "WARNING: $(this.bundle) is only compatible with cfengine 3.10.0 and greater.";
-      "WARNING: $(this.bundle) Please consider undefining mpf_augments_control_enabled.";
 
     server_controls_repaired|runagent_controls_repaired::
       "Should restart cf-serverd because something in its data changed.";

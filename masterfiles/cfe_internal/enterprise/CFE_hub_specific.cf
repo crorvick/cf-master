@@ -14,6 +14,19 @@
 #
 ##################################################################
 
+@if minimum_version(3.12.0)
+bundle common cfe_hub_specific_file_control
+{
+  vars:
+    "inputs" slist => { "$(this.promise_dirname)/federation/federation.cf" };
+}
+
+body file control
+{
+        inputs => { @(cfe_hub_specific_file_control.inputs) };
+}
+@endif
+
 bundle common cfe_internal_hub_vars
 # @brief Set hub specific variables
 {
@@ -147,57 +160,6 @@ bundle agent cfe_internal_update_folders
 
 }
 
-##################################################################
-#
-# cfe_internal_apache_sudoer
-#  - permit apache user to run passwordless sudo to cf-runagent
-#
-##################################################################
-
-bundle agent cfe_internal_apache_sudoer
-# @brief Ensure that cfapache user can run cf-runagent with elevated privledges
-{
-  classes:
-
-    !windows::
-
-      "sudoers_exists" expression => fileexists("/etc/sudoers"),
-      comment => "Check if there is /etc/sudoers",
-      handle => "cfe_internal_apache_sudoer_vars_linux_sudoers_exists";
-
-      #
-
-  files:
-
-    sudoers_exists.cfengine_internal_sudoers_editing_enable::
-
-      "/etc/sudoers"
-      comment => "Permit Apache user to run passwordless sudo cf-runagent",
-      handle => "cfe_internal_apache_sudoer_files_etc_sudoer",
-      edit_line => apache_sudoer;
-
-  reports:
-    (DEBUG|DEBUG_cfengine_internal_apache_sudoer).!cfengine_internal_sudoers_editing_enable::
-      "DEBUG $(this.bundle): Editing of the sudoers file is disabled. The Apache user
-       may not be able to run passwordless sudo cf-runagent";
-}
-
-#
-
-bundle edit_line apache_sudoer
-# @brief Ensure that the cfapache user can run cf-runagent as root without a password
-{
-  insert_lines:
-
-    linux::
-
-      "$(def.cf_apache_user) ALL=(ALL) NOPASSWD:$(sys.bindir)/cf-runagent *"
-      comment => "Add Apache user to run passwordless sudo cf-runagent",
-      handle => "apache_sudoer_insert_lines";
-}
-
-
-
 bundle agent cfe_internal_php_runalerts
 # @brief Manage the runalerts service.
 #
@@ -210,7 +172,7 @@ bundle agent cfe_internal_php_runalerts
 
       "runalerts_types"
         comment => "Runalerts is run for different types of alerts",
-        slist => { "sketch", "sql" };
+        slist => { "all" };
 
       "runalerts_script" string => "$(sys.bindir)/runalerts.php",
       comment => "location of php runalerts script",
@@ -230,53 +192,26 @@ bundle agent cfe_internal_php_runalerts
       comment => "if script does not function in minutes, restart the script",
       handle => "cfe_internal_php_runalerts_vars_stale_time";
 
-      "sql[name]"        string => "sql",
-      comment => "name of query type - sql",
+      "all[name]"        string => "all",
+      comment => "name of query type - all",
 
-      handle => "cfe_internal_php_runalerts_vars_sql_name";
-      "sql[limit]"       string => "300",
+      handle => "cfe_internal_php_runalerts_vars_all_name";
+      "all[limit]"       string => "300",
       comment => "query limit of sql",
-      handle => "cfe_internal_php_runalerts_vars_sql_limit";
+      handle => "cfe_internal_php_runalerts_vars_all_limit";
 
-      "sql[running]"     string => "20",
+      "all[running]"     string => "20",
       comment => "how many query at a time of sql",
-      handle => "cfe_internal_php_runalerts_vars_sql_running";
-
-      "sketch[name]"     string => "sketch",
-      comment => "name of query type - sketch",
-      handle => "cfe_internal_php_runalerts_vars_sketch_name";
-
-      "sketch[limit]"    string => "300",
-      comment => "query limit of sketch",
-      handle => "cfe_internal_php_runalerts_vars_sketch_limit";
-
-      "sketch[running]"  string => "10",
-      comment => "how many query at a time of sketch",
-      handle => "cfe_internal_php_runalerts_vars_sketch_running";
+      handle => "cfe_internal_php_runalerts_vars_all_running";
 
   classes:
 
       "systemd_supervised"
         scope => "bundle",
-        expression => "systemd.!(cfengine_3_7|cfengine_3_8|cfengine_3_9)",
+        expression => "systemd",
         comment => "As of 3.10 the runalerts service is supervised by systemd
                     when available. Prior to 3.10 the service is supervised
                     directly by CFEngine policy.";
-
-      # NOTE The `hub_active` class is a hard class defined by the ha_plugin in
-      # the enterprise agent.
-      "active_hub"
-      comment => "The runalerts service should only run on policy servers that
-                  are active.",
-      scope => "bundle",
-      expression => "policy_server.(!enable_cfengine_enterprise_hub_ha|(enable_cfengine_enterprise_hub_ha.hub_active))";
-
-      # TODO Consider using `hub_passive` instead of `!hub_active`
-      "passive_ha_hub"
-      comment => "To avoid duplicate alerts the runalerts service should not run
-                  on standby hubs.",
-      scope => "bundle",
-      expression => "policy_server.(enable_cfengine_enterprise_hub_ha.!hub_active)";
 
   files:
 
@@ -435,6 +370,85 @@ bundle agent cfe_internal_purge_scheduled_reports_older_than_days(days)
                     They need to be cleaned up as to not fill the disk.";
 
 }
+bundle agent inventory_cfengine_enterprise_license_utilization
+# @brief Inventory CFEngine Enterprise License Utilization
+{
+
+@if minimum_version(3.15.0)
+  classes:
+
+    enterprise_edition::
+    "have_cf_hub" expression => fileexists( $(cf_hub) );
+
+  vars:
+      "cf_hub" string => "/var/cfengine/bin/cf-hub";
+
+   have_cf_hub::
+      "cf_hub_show_license_output" string => '$(sys.statedir)/cf-hub-show-license.txt';
+
+      "parsed_license"
+        data => data_readstringarray( $(cf_hub_show_license_output),
+                                      "",
+                                      ":\s+",
+                                      10,
+                                      500),
+        if => fileexists( $(cf_hub_show_license_output) );
+
+      "license_file"
+        string => "$(parsed_license[License file])",
+        meta => { "inventory", "attribute_name=CFEngine Enterprise license file" };
+
+      "license_owner" -> { "ENT-5337" }
+        string => "$(with)",
+        meta => { "inventory", "attribute_name=CFEngine Enterprise license owner" },
+        with => nth( string_split( "$(parsed_license[Company name])", "\W", inf ), 0),
+        if => isvariable( "parsed_license[Company Name]" );
+
+      "license_utilization"
+        string => "$(with)",
+        meta => { "inventory", "attribute_name=CFEngine Enterprise license utilization" },
+        with => nth( string_split( "$(parsed_license[Utilization])", "\W", inf ), 0),
+        if => isvariable( "parsed_license[Utilization]" );
+
+      "license_expiration"
+        string => "$(parsed_license[Expiration date])",
+        meta => { "inventory", "attribute_name=CFEngine Enterprise license expiration date" },
+        if => isvariable( "parsed_license[Expiration date]" );
+
+      "license_count"
+        string => "$(with)",
+        with => nth( string_split( "$(parsed_license[Utilization])", "\W", inf ), 1),
+        meta => { "inventory", "attribute_name=CFEngine Enterprise licenses allocated" },
+        if => isvariable( "parsed_license[Utilization]" );
+
+      "license_status"
+        string => "$(parsed_license[License status])",
+        meta => { "inventory", "attribute_name=CFEngine Enterprise license status" },
+        if => isvariable( "parsed_license[License status]" );
+
+  commands:
+
+   have_cf_hub::
+
+      "$(sys.cf_hub)"
+        arglist => {  "--show-license", ">",  $(cf_hub_show_license_output) },
+        contain => in_shell,
+        inform => "false",
+        classes => ENT_5279;
+
+@endif
+}
+
+body classes ENT_5279
+# @brief Work around ENT-5279, cf-hub --show-license returns 1 when no license is installed
+{
+
+  # TODO: Redact when 3.15.x is no longer supported
+  # considered kept on affected versions.
+
+  cfengine_3_15_0::
+    kept_returncodes => { "0", "1" };
+}
 
 bundle agent log_cfengine_enterprise_license_utilization
 # @brief Log the number of hosts seen within the last 24 hours and the number of
@@ -488,6 +502,23 @@ bundle agent log_cfengine_enterprise_license_utilization
 
 }
 
+bundle agent cfe_internal_enterprise_HA_classes
+{
+  classes:
+      # NOTE The `hub_active` class is a hard class defined by the ha_plugin in
+      # the enterprise agent.
+      "active_hub"
+        expression => "policy_server.(!enable_cfengine_enterprise_hub_ha|(enable_cfengine_enterprise_hub_ha.hub_active))",
+        scope => "namespace",
+        comment => "This means this is a hub that is not in an HA setup or the active one in a HA setup";
+
+      # TODO Consider using `hub_passive` instead of `!hub_active`
+      "passive_ha_hub"
+        expression => "policy_server.(enable_cfengine_enterprise_hub_ha.!hub_active)",
+        scope => "namespace",
+        comment => "This means this is a passive hub in an HA setup";
+}
+
 bundle agent cfe_internal_enterprise_maintenance
 # @brief Actuate bundles tagged with `enterprise_maintenance` in lexically sorted order
 {
@@ -507,6 +538,11 @@ bundle agent cfe_internal_enterprise_maintenance
 
   methods:
 
+    enterprise_edition::
+      "HA classes"
+        usebundle => "cfe_internal_enterprise_HA_classes",
+        comment => "Set the HA-related classes for the maintenance bundles";
+
       "Enterprise Maintenance"
         usebundle => $(enterprise_maintenance_bundles),
         ifvarclass => isgreaterthan( $(enterprise_maintenance_bundle_count), 0 );
@@ -522,6 +558,18 @@ bundle agent cfe_internal_enterprise_maintenance
         ifvarclass => isgreaterthan( $(enterprise_maintenance_bundle_count), 0 );
 }
 
+bundle agent cfe_internal_refresh_inventory_args
+{
+  vars:
+    cfengine_enterprise_federation:am_superhub::
+      "args" -> {"ENT-4527"}
+        string => "inventory_refresh_by_hostkey $(sys.key_digest)",
+        comment => "Only refresh inventory for the superhub, other hosts get refreshed on data import";
+
+    !cfengine_enterprise_federation:am_superhub::
+      "args" string => "inventory_refresh";
+}
+
 bundle agent cfe_internal_refresh_inventory_view
 # @brief Refresh materialized view every 5 minutes
 {
@@ -531,17 +579,24 @@ bundle agent cfe_internal_refresh_inventory_view
 
       "tags" slist => { "enterprise_maintenance" };
 
+  methods:
+@if minimum_version(3.12.0)
+      # we need to know if we are running on a superhub
+      "superhub_config" usebundle => "cfengine_enterprise_federation:config";
+@endif
+
+      "inventory_refresh_args" usebundle => "cfe_internal_refresh_inventory_args";
+
   commands:
 
-    (policy_server|am_policy_hub).enterprise_edition::
+    (policy_server|am_policy_hub).enterprise_edition.active_hub::
 
       "$(sys.workdir)/httpd/php/bin/php"
-        args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks inventory_refresh",
+        args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks $(cfe_internal_refresh_inventory_args.args)",
         contain => silent,
         comment => "This refreshes the inventory view. If the inventory view is not refreshed then it will contain stale data.",
         handle  => "mpf_fresh_inventory_view",
         if => isdir( "$(cfe_internal_hub_vars.docroot)/api/modules/inventory" );
-
 }
 
 bundle agent cfe_internal_refresh_hosts_view
@@ -555,7 +610,7 @@ bundle agent cfe_internal_refresh_hosts_view
 
   commands:
 
-    (policy_server|am_policy_hub).enterprise_edition::
+    (policy_server|am_policy_hub).enterprise_edition.active_hub::
 
       "$(sys.workdir)/httpd/php/bin/php" -> { "ENT-3482" }
         args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks materialized_hosts_view_refresh",
@@ -577,7 +632,7 @@ bundle agent cfe_internal_clear_last_seen_hosts_logs
 
   commands:
 
-    (policy_server|am_policy_hub).enterprise_edition::
+    (policy_server|am_policy_hub).enterprise_edition.active_hub.(cfengine_3_12|cfengine_3_13|cfengine_3_14)::
 
       "$(sys.workdir)/httpd/php/bin/php" -> { "ENT-3550" }
         args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks clearLastSeenHostsLogs",
@@ -599,7 +654,7 @@ bundle agent cfe_internal_refresh_events_table
 
   commands:
 
-    (policy_server|am_policy_hub).enterprise_edition::
+    (policy_server|am_policy_hub).enterprise_edition.active_hub::
 
       "$(sys.workdir)/httpd/php/bin/php"
         args => "$(cfe_internal_hub_vars.docroot)/index.php cli_tasks process_api_events",
@@ -617,4 +672,59 @@ body classes cfe_internal_log_utilization(time)
 
         scope => "namespace";
         persist_time => "$(time)";
+}
+
+bundle agent cfe_internal_enterprise_policy_analyzer
+# @brief Ensure published policy is available for use with policy analyzer
+# @description This bundle runs as part of the enterprise_maintenance bundles. When `analyzer_flagfile` exists, this bundle ensures policy from `analyzer_source` is kept in sync with `analyzer_dir`.
+{
+    meta:
+
+    (policy_server|am_policy_hub).enterprise_edition::
+
+      "tags" -> { "ENT-4192" }
+        slist => { "enterprise_maintenance" };
+
+  vars:
+
+    enterprise_edition.policy_server::
+
+      "analyzer_flagfile" string => "$(cfe_internal_hub_vars.docroot)/analyzer/pa.enabled";
+      "analyzer_dir" string => "/opt/cfengine/analyzer/policy/masterfiles";
+      "analyzer_source" string => "$(sys.masterdir)";
+
+  classes:
+
+    enterprise_edition.policy_server::
+
+      "policy_analyzer_enabled" expression => fileexists( $(analyzer_flagfile) );
+
+    files:
+
+    policy_analyzer_enabled::
+
+      "$(analyzer_dir)/."
+        create => "true",
+        perms => mog( "500", $(def.cf_apache_user), $(def.cf_apache_user) );
+
+       "$(analyzer_dir)/."
+         copy_from => analyzer_sync( $(analyzer_source) ),
+         file_select => all,
+         depth_search => recurse_with_base( inf ),
+         perms => mog( "400", $(def.cf_apache_user), $(def.cf_apache_group) );
+
+  reports:
+      DEBUG|DEBUG_cfe_internal_enterprise_policy_analyzer::
+        "DEBUG Mission Portal Policy Analyzer enabled. Keeping '$(analyzer_dir)' in sync with '$(analyzer_source)'"
+          if => "policy_analyzer_enabled";
+
+}
+
+body copy_from analyzer_sync(path)
+# @brief Keep promised files in sync with local `path`
+{
+        source   => "$(path)";
+        purge    => "true";
+        preserve => "false";
+        compare  => "digest";
 }

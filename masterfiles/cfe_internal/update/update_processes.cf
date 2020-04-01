@@ -14,6 +14,8 @@
 ################################################################################
 
 bundle common cfe_internal_process_knowledge
+# @brief Variables related to CFEngine's own processes used in other bundles
+# TODO Redact use of this bundle. It's no longer useful now that bindir variable exists. Not clear why its unset on windows.
 {
   vars:
 
@@ -35,14 +37,31 @@ bundle agent cfe_internal_update_processes
 #   persistent_disable_cf_monitord) is defined the service will be disabled.
 #
 # * If the component is found in def.agents_to_be_disabled it will be disabled.
+#
+# * To enable component management on hosts with systemd define the class
+#    `mpf_enable_cfengine_systemd_component_management`.
 {
   classes:
       "systemd_supervised"
         scope => "bundle",
-        expression => "systemd.!(cfengine_3_7|cfengine_3_8|cfengine_3_9)",
+        expression => "systemd",
         comment => "As of 3.10 the runalerts service is supervised by systemd
                     when available. Prior to 3.10 the service is supervised
                     directly by CFEngine policy.";
+
+  reports:
+      inform.systemd_supervised.!mpf_enable_cfengine_systemd_component_management::
+      "NOTE: You have defined a class to persistently disable a cfengine
+             component on a systemd managed host, but you have not defined
+             mpf_enable_cfengine_systemd_component_management in order to enable
+             management"
+        if => classmatch( "persistent_disable_cf_.*" );
+
+      "NOTE: You have explicitly listed components that should be disabled in def.agents_to_be_disabled.
+             This host is managed by systemd and requires the class
+             mpf_enable_cfengine_systemd_component_management in order to enable
+             active management"
+        if => some( ".*", @(def.agents_to_be_disabled) );
 
   vars:
 
@@ -114,7 +133,7 @@ bundle agent cfe_internal_update_processes
       # class OR if the agent is found in a list of agents to be specifically
       # disabled.
 
-      "disable[$(all_agents)]"
+      "disabled[$(all_agents)]"
         string => "$(all_agents)",
         ifvarclass => or( canonify( "persistent_disable_$(all_agents)" ),
                           some( "$(all_agents)", agents_to_be_disabled ));
@@ -138,23 +157,25 @@ bundle agent cfe_internal_update_processes
   methods:
 
     systemd.!systemd_supervised::
+      # TODO Remove from policy.
+      # This makes sure the cfengine3 (umbrella) unit is active. It does not
+      # make any assertions about individual components. Furthermore, since
+      # commit 6a7fe6b3fa466e55b29eca75cd53ff8b2883ff0e (introduced in 3.14)
+      # this policy won't be run because systemd_supervised is defined any time
+      # systemd is defined.
 
       "CFENGINE systemd service"
       usebundle => maintain_cfe_systemd,
       comment => "Call a bundle to maintain CFEngine with systemd",
       handle => "cfe_internal_update_processes_methods_maintain_systemd";
 
-    systemd_supervised::
+    systemd_supervised.mpf_enable_cfengine_systemd_component_management::
 
-      # By default when running under systemd supervision, cfengine will not
-      # continue to make sure that the units are enabled or running. To enable
-      # this internal management please uncomment the following.
+      "CFEngine systemd Unit Definitions"
+        usebundle => cfe_internal_systemd_unit_files;
 
-    #  "CFEngine systemd Unit Definitions"
-    #    usebundle => cfe_internal_systemd_unit_files;
-
-    #  "CFEngine systemd Unit States"
-    #    usebundle => cfe_internal_systemd_service_unit_state;
+      "CFEngine systemd Unit States"
+        usebundle => cfe_internal_systemd_service_unit_state;
 
     am_policy_hub.enterprise.!systemd_supervised::
 
@@ -195,6 +216,7 @@ bundle agent cfe_internal_update_processes
 #
 
 bundle agent maintain_cfe_hub_process
+# @brief Ensure the proper processes are running on Enterprise hubs.
 {
   vars:
 
@@ -320,6 +342,8 @@ bundle agent maintain_cfe_hub_process
 #
 
 bundle agent disable_cfengine_agents(process)
+# @brief Ensure cfengine component is not running
+# @param process The name of the cfengine component binary to ensure not running. [cf-agent, cf-serverd, cf-monitord, cf-hub]
 {
   vars:
 
@@ -357,6 +381,8 @@ bundle agent disable_cfengine_agents(process)
 ###############################################################################
 #
 bundle agent enable_cfengine_agents(process)
+# @brief Ensure cfengine component is running
+# @param process The name of the cfengine component binary to ensure running. [cf-agent, cf-serverd, cf-monitord, cf-hub]
 {
   vars:
 
@@ -419,6 +445,7 @@ bundle agent enable_cfengine_agents(process)
 #
 
 bundle agent maintain_cfe_windows
+# @brief Ensure cfengine components are running
 {
   vars:
 
@@ -487,6 +514,7 @@ bundle agent maintain_cfe_windows
 }
 
 bundle agent maintain_cfe_systemd
+# @brief Ensure cfengine components are running
 {
   classes:
     systemd::
@@ -503,6 +531,7 @@ bundle agent maintain_cfe_systemd
 }
 
 body classes u_clear_always(theclass)
+# @brief Undefine, `theclass` for as a result of the promise actuation, no matter the outcome (kept, notkept, repaired)
 {
       cancel_kept => { $(theclass) };
       cancel_notkept => { $(theclass) };
@@ -510,6 +539,7 @@ body classes u_clear_always(theclass)
 }
 
 body classes u_always_forever(theclass)
+# @brief Define `theclass` for 999999999 minutes (1902 years) as a result of the promise actuation, no matter the outcome (kept, notkept, repaired)
 {
       promise_kept => { $(theclass) };
       promise_repaired => { $(theclass) };

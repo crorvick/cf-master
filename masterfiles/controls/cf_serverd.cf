@@ -7,11 +7,15 @@
 ###############################################################################
 
 body server control
-
+# @brief Control attributes for cf-serverd
 {
       # List of ciphers the server accepts. For Syntax help see man page
       # for "openssl ciphers". Default is "AES256-GCM-SHA384:AES256-SHA"
       #allowciphers          => "AES256-GCM-SHA384:AES256-SHA";
+
+      # Minimum required version of TLS. Set to "1.0" if you need clients
+      # running CFEngine in a version lower than 3.7.0 to connect.
+      #allowtlsversion => "1.1";
 
       # List of hosts that may connect (change the ACL in def.cf)
       allowconnects         => { "127.0.0.1" , "::1", @(def.acl) };
@@ -58,7 +62,7 @@ body server control
       cfruncommand => "$(sys.cf_agent) -I -D cf_runagent_initiated -f \"$(sys.update_policy_path)\"  &
                        $(sys.cf_agent) -I -D cf_runagent_initiated";
 
-    !windows.!cfengine_3_7::
+    !windows::
 
       # In 3.10 the quotation is properly closed when EOF is reached. It is left
       # open so that arguments (like -K and --remote-bundles) can be appended.
@@ -68,31 +72,12 @@ body server control
                            $(sys.cf_agent) -I -D cf_runagent_initiated -f $(sys.update_policy_path)  ;
                            $(sys.cf_agent) -I -D cf_runagent_initiated";
 
-    !windows.cfengine_3_7::
-
-      # 3.7.x does not properly close open quotes when EOF is reached preventing
-      # policy execution, so we must provide a trailing quote for cfruncommand.
-
-      # 3.7.x Automatically appends -I -Dcfruncommand to the cfruncommand. This
-      # results in an error about not being allowed to specify inputs for remote
-      # execution from the update policy. In order to preserve the ability for
-      # policy to know its execution provenance we define a different class
-      # `cf_runagent_initiated` that does not elicit the error.
-
-        cfruncommand => "$(def.cf_runagent_shell) -c \'
-                           $(sys.cf_agent) -I -D cf_runagent_initiated -f $(sys.update_policy_path)  ;
-                           $(sys.cf_agent) -I -D cf_runagent_initiated\'";
-
-      # Bind to all interfaces including ipv6
-      # Adding this on windows will force ipv6 only
-      bindtointerface => "::";
-
 }
 
 ###############################################################################
 
 bundle server access_rules()
-
+# @brief Defines access to common resources
 {
   access:
 
@@ -102,34 +87,50 @@ bundle server access_rules()
       handle => "server_access_grant_access_policy",
       shortcut => "masterfiles",
       comment => "Grant access to the policy updates",
-      admit => { @(def.acl) };
-
-      "$(def.dir_software)/"
-      handle => "server_access_grant_access_datafiles",
-      comment => "Grant access to software updates",
+      if => isdir( "$(def.dir_masterfiles)/" ),
       admit => { @(def.acl) };
 
       "$(def.dir_bin)/"
       handle => "server_access_grant_access_binary",
       comment => "Grant access to binary for cf-runagent",
+      if => isdir( "$(def.dir_bin)/" ),
+      admit => { @(def.acl) };
+
+      "$(def.dir_data)/"
+      handle => "server_access_grant_access_data",
+      shortcut => "data",
+      comment => "Grant access to data directory",
+      if => isdir( "$(def.dir_data)/" ),
       admit => { @(def.acl) };
 
       "$(def.dir_modules)/"
       handle => "server_access_grant_access_modules",
       shortcut => "modules",
       comment => "Grant access to modules directory",
+      if => isdir( "$(def.dir_modules)/" ),
       admit => { @(def.acl) };
 
       "$(def.dir_plugins)/"
       handle => "server_access_grant_access_plugins",
       comment => "Grant access to plugins directory",
+      if => isdir( "$(def.dir_plugins)/" ),
       admit => { @(def.acl) };
 
       "$(def.dir_templates)/"
       handle => "server_access_grant_access_templates",
       shortcut => "templates",
       comment => "Grant access to templates directory",
+      if => isdir( "$(def.dir_templates)/" ),
       admit => { @(def.acl) };
+
+    policy_server|am_policy_hub::
+
+      "$(def.dir_master_software_updates)/" -> { "ENT-4953" }
+        handle => "server_access_grant_access_master_software_updates",
+        shortcut => "master_software_updates",
+        comment => "Grant access for hosts to download cfengine packages for self upgrade",
+        if => isdir( "$(sys.workdir)/master_software_updates" ),
+        admit => { @(def.acl) };
 
       enterprise_edition.policy_server::
         "collect_calls"
@@ -146,18 +147,37 @@ bundle server access_rules()
       "$(sys.workdir)/ppkeys/"
       handle => "server_access_grant_access_ppkeys_hubs",
       comment => "Grant access to ppkeys for HA hubs",
+      if => isdir( "$(sys.workdir)/ppkeys/" ),
       admit => { @(def.policy_servers) };
 
-      # Allow slave hub to synchronize cf_robot and appsettings content.
+      # Allow slave hub to synchronize cf_robot and appsettings, application
+      # config config, ldap config settings, and ldap api config settings.
       # Files are containing configuration that must be the same on all hubs.
       "$(sys.workdir)/httpd/htdocs/application/config/cf_robot.php"
       handle => "server_access_grant_access_cf_robot",
       comment => "Grant access to cf_robot file for HA hubs",
       admit => { @(def.policy_servers) };
 
-      "$(sys.workdir)/share/GUI/application/config/appsettings.php"
+      "$(sys.workdir)/httpd/htdocs/application/config/appsettings.php"
       handle => "server_access_grant_access_appsettings",
       comment => "Grant access to appsettings for HA hubs",
+      admit => { @(def.policy_servers) };
+
+      "$(sys.workdir)/httpd/htdocs/application/config/config.php" -> { "ENT-4944" }
+      handle => "server_access_grant_access_application_config_config_php",
+      comment => "Grant access to application config for HA hubs",
+      admit => { @(def.policy_servers) };
+
+
+      "$(sys.workdir)/httpd/htdocs/ldap/config/settings.php" -> { "ENT-4944" }
+      handle => "server_access_grant_access_ldap_config_settings_php",
+      comment => "Grant access to ldap config settings for HA hubs",
+      admit => { @(def.policy_servers) };
+
+
+      "$(sys.workdir)/httpd/htdocs/api/config/config.php" -> { "ENT-4944" }
+      handle => "server_access_grant_access_api_config_settings_php",
+      comment => "Grant access to LDAP api config for HA hubs",
       admit => { @(def.policy_servers) };
 
       # Allow access to notification_scripts directory so passive hub
@@ -166,7 +186,8 @@ bundle server access_rules()
       # accessible.
       "/opt/cfengine/notification_scripts/"
       handle => "server_access_grant_access_notification scripts",
-      comment => "Grant access tonotification scripts",
+      comment => "Grant access to notification scripts",
+      if => isdir( "/opt/cfengine/notification_scripts/" ),
       admit => { @(def.policy_servers) };
 
       # When HA is enabled clients are updating active hub IP address
@@ -183,6 +204,7 @@ bundle server access_rules()
       "$(ha_def.hubs_keys_location)/"
       handle => "server_access_grant_access_to_clients",
       comment => "Grant access to hubs' keys to clients",
+      if => isdir("$(ha_def.hubs_keys_location)/"),
       admit => { @(def.acl) };
 
     windows::
