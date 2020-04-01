@@ -230,8 +230,8 @@ bundle agent cfe_internal_database_cleanup_consumer_status (row_count)
         string => "DELETE FROM $(status_table_name) WHERE ts IN (SELECT ts FROM $(status_table_name) ORDER BY ts DESC OFFSET 50000);";
 
 
-      "delete_future_ts_query" -> { "ENT-4362" }
-        string => "DELETE FROM status WHERE  to_timestamp(ts::bigint) > (now() + interval '2 days')::timestamp;";
+      "delete_future_ts_query" -> { "ENT-4362", "ENT-4992" }
+        string => "DELETE FROM $(status_table_name) WHERE to_timestamp(ts::bigint) > (now() + interval '2 days')::timestamp;";
 
     has_sql_function_cleanup_historical_data::
 
@@ -360,4 +360,26 @@ bundle agent cfe_internal_postgresql_vacuum
       "$(vacuum_cfdb_cmd)"
       comment => "Run vacuum db command (database: cfdb)",
       handle => "cfe_internal_postgresql_maintenance_commands_run_vacuumdb";
+}
+
+bundle monitor measure_psql
+{
+  measurements:
+    policy_server|am_policy_hub::
+      "/var/log/postgresql.log"
+        if => fileexists( "/var/log/postgresql.log"),
+        handle => "psql_lock_wait_before_acquisition",
+        stream_type => "file",
+        data_type => "real",
+        history_type => "weekly",
+        units => "ms",
+        match_value => acquired_lock;
+}
+
+body match_value acquired_lock
+{
+  select_line_matching => ".*acquired.*Lock.*";
+  extraction_regex => ".*after (\d+)";
+  track_growing_file => "true";
+  select_multiline_policy => "average"; # average, sum, first, last
 }

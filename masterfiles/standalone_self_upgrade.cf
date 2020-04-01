@@ -65,24 +65,13 @@ bundle common u_common_knowledge
       "list_update_ifelapsed_now" string => "10080";
 }
 bundle agent cfengine_software
-#@ brief Variables to control the specifics in desired package selection
+# @brief Variables to control the specifics in desired package selection
 {
   vars:
 
       # Default desired CFEngine software
-
-      "pkg_name" string => "cfengine-nova";
-      "pkg_version" string => "3.12.2";
-      "pkg_release" string => "1";
-      "pkg_arch" string => "x86_64";
-      "package_dir" string => "$(sys.flavour)_$(sys.arch)";
-
-!(cfengine_3_7_1|cfengine_3.7.2|cfengine_3.7.3)::
-# After 3.7.4 a fix to ifelse and isvarible allows for actuating the function
-# even thought the promise references an unresolved variable.
-
       "pkg_name" string => ifelse( isvariable( "def.cfengine_software_pkg_name" ), $(def.cfengine_software_pkg_name), "cfengine-nova");
-      "pkg_version" string => ifelse( isvariable( "def.cfengine_software_pkg_version" ), $(def.cfengine_software_pkg_version), "3.12.2");
+      "pkg_version" string => ifelse( isvariable( "def.cfengine_software_pkg_version" ), $(def.cfengine_software_pkg_version), "3.15.1");
       "pkg_release" string => ifelse( isvariable( "def.cfengine_software_pkg_release" ), $(def.cfengine_software_pkg_release), "1");
       "pkg_arch" string => ifelse( isvariable( "def.cfengine_software_pkg_arch" ), $(def.cfengine_software_pkg_arch), "x86_64");
       "package_dir" string => ifelse( isvariable( "def.cfengine_software_pkg_dir" ), $(def.cfengine_software_pkg_dir), "$(sys.flavour)_$(sys.arch)");
@@ -171,8 +160,8 @@ bundle agent cfengine_software_cached_locally
       "package_dir"
         string => "$(cfengine_software.package_dir)";
 
-      # TODO Add shortcut for this path
-      "master_software_location"  string => "/var/cfengine/master_software_updates",
+      "master_software_location" -> { "ENT-4953" }
+        string => "master_software_updates",
         comment => "The Cfengine binary updates directory on the policy server",
         handle => "cfe_internal_update_bins_vars_master_software_location";
 
@@ -203,8 +192,17 @@ bundle agent cfengine_software_version
 # upgrading.
 {
   classes:
-      "__supported_platform"
-        or => { "redhat.!redhat_4", "centos.!centos_4", "debian", "ubuntu", "hpux", "aix" };
+      "__supported_platform" -> { "ENT-5045", "ENT-5152" }
+        or => {
+                "redhat.!redhat_4",
+                "centos.!centos_4",
+                "debian",
+                "ubuntu",
+                "hpux",
+                "aix",
+                "SUSE_11",
+                "SUSE_12",
+        };
 
       "__new_implementation"
         or => { "redhat", "centos", "ubuntu", "debian" };
@@ -232,7 +230,7 @@ bundle agent cfengine_software_version
 }
 
 bundle agent cfengine_software_version_packages2
-#@ brief Ensure the correct version of software is installed using the new packages promise implementation
+# @brief Ensure the correct version of software is installed using the new packages promise implementation
 {
   vars:
       "pkg_name" string => "$(cfengine_software.pkg_name)";
@@ -263,7 +261,7 @@ bundle agent cfengine_software_version_packages2
 }
 
 bundle agent cfengine_software_version_packages1
-#@ brief Ensure the correct version of software is installed using the legacy self update mechanism
+# @brief Ensure the correct version of software is installed using the legacy self update mechanism
 #@ **Supported Platforms:**
 #@ - RedHat|Centos|Suse (rpm)
 #@ - Debian|Ubuntu (dpkg)
@@ -390,6 +388,7 @@ bundle agent cfengine_software_version_packages1
 }
 
 bundle common cfengine_package_names
+# @brief Maps platforms to the package naming convention used by the self upgrade policy
 {
   vars:
       "pkg_name" string => "$(cfengine_software.pkg_name)";
@@ -485,7 +484,7 @@ bundle common cfengine_package_names
 }
 
 bundle agent cfengine_master_software_content
-# When cfengine_master_software_content_state_present is defined the software
+# @brief When cfengine_master_software_content_state_present is defined the software
 # will try be be automatically downloaded.
 {
   vars:
@@ -565,9 +564,10 @@ bundle agent cfengine_master_software_content
       "dir[ubuntu_16_i686]" string => "$(dir[debian_4_i386])";
 
       "platform_dir" slist => getindices( dir );
+      "download_dir" string => "$(sys.workdir)/master_software_updates";
 
   files:
-      "/var/cfengine/master_software_updates/$(platform_dir)/."
+      "$(download_dir)/$(platform_dir)/."
        create => "true",
        comment => "We need a place to download each packge we build";
 
@@ -575,11 +575,11 @@ bundle agent cfengine_master_software_content
       # Fetch each package that we don't already have
        "/usr/bin/curl"
         args => "-s $(base_url)/$(dir[$(platform_dir)])/$(cfengine_package_names.pkg[$(platform_dir)]) --output /var/cfengine/master_software_updates/$(platform_dir)/$(cfengine_package_names.pkg[$(platform_dir)])",
-        if => not( fileexists( "/var/cfengine/master_software_updates/$(platform_dir)/$(cfengine_package_names.pkg[$(platform_dir)])" ) );
+        if => not( fileexists( "$(download_dir)/$(platform_dir)/$(cfengine_package_names.pkg[$(platform_dir)])" ) );
 
   reports:
     DEBUG|DEBUG_cfengine_master_software_content::
-      "curl -s $(base_url)/$(dir[$(i)])/$(cfengine_package_names.pkg[$(i)]) --output /var/cfengine/master_software_updates/$(i)/$(cfengine_pacakge_names.pkg[$(i)])";
+      "curl -s $(base_url)/$(dir[$(i)])/$(cfengine_package_names.pkg[$(i)]) --output $(download_dir)/$(i)/$(cfengine_package_names.pkg[$(i)])";
 }
 
 bundle edit_line u_backup_script
@@ -632,8 +632,8 @@ bundle edit_line u_install_script
       "#!/bin/sh
 
 pkgname=`pkginfo -d $(const.dollar)1 | awk '{print $(const.dollar)2}'`
-/usr/sbin/pkgrm -n -a $(cfe_internal_update_bins.admin_file) $pkgname
-/usr/sbin/pkgadd -n -a $(cfe_internal_update_bins.admin_file) -d $(const.dollar)1 all
+/usr/sbin/pkgrm -n -a $(cfengine_software_version_packages1.admin_file) $pkgname
+/usr/sbin/pkgadd -n -a $(cfengine_software_version_packages1.admin_file) -d $(const.dollar)1 all
 $(sys.workdir)/bin/cf-execd || true
 exit 0";
 
@@ -681,11 +681,15 @@ basedir=default";
 }
 
 body action u_immediate
+# @brief Ignore promise locks, actuate the promise immediately
 {
       ifelapsed => "0";
 }
 
 body copy_from u_dsync(from,server)
+# @brief Synchronize promiser with `from` on `server` using digest comparison. If host is a policy hub, then it skips the remote copy, preferring the local file path. For this reason, this body is not compatible with shortcuts defined by cf-serverd.
+# @param from File path to copy from on remote server
+# @param server Remote server to copy file from if executing host is not a policy server
 {
       # NOTE policy servers cheat and copy directly from the local file system.
       # This works even if cf-serverd is down and it makes sense if your serving
@@ -706,10 +710,15 @@ body copy_from u_dsync(from,server)
 }
 
 body classes u_if_repaired(x)
+# @brief Define `x` if promise results in a repair
+# @param x Name of the class to be defined if promise results in repair
 {
       promise_repaired => { "$(x)" };
 }
 body classes u_if_else(yes,no)
+# @brief Define `yes` if promise results in a repair, `no` if promise is not kept (failed, denied, timeout)
+# @param yes class to define if promise results in repair
+# @param no class to define if promise is not kept (failed, denied, timeout)
 {
       #      promise_kept     => { "$(yes)" };
       promise_repaired => { "$(yes)" };
@@ -719,8 +728,9 @@ body classes u_if_else(yes,no)
 }
 
 body common control
+# @brief Common control for standalone self upgrade
 {
-      version => "CFEngine Standalone Self Upgrade 3.12.2";
+      version => "CFEngine Standalone Self Upgrade 3.15.1";
 
     (debian|ubuntu)::
       package_inventory => { $(package_module_knowledge.platform_default) };
@@ -736,6 +746,8 @@ body common control
 }
 
 body depth_search u_recurse_basedir(d)
+# @brief Search recursively from (and including) the referenced directory directory to depth `d` excluding common version control paths
+# @param d maximum depth to descend
 {
       include_basedir => "true";
       depth => "$(d)";
@@ -758,6 +770,8 @@ body file_select plain
 }
 
 body package_method u_generic(repo)
+# @brief Generic package_method capable of managing packages on multiple platforms.
+# @param repo Local directory to look for packages in
 {
 
     debian::
@@ -789,9 +803,6 @@ body package_method u_generic(repo)
         package_add_command        => "/usr/bin/dpkg --force-confdef --force-confnew --install";
         package_delete_command     => "/usr/bin/dpkg --purge";
 
-    debian::
-        package_update_command     => "$(sys.workdir)/bin/cf-upgrade -b $(cfe_internal_update_bins.backup_script) -s $(cfe_internal_update_bins.backup_file) -i $(cfe_internal_update_bins.install_script)";
-
     redhat|SuSE|suse|sles::
 
         package_changes => "individual";
@@ -818,8 +829,8 @@ body package_method u_generic(repo)
         package_version_less_command => "$(sys.bindir)/rpmvercmp '$(v1)' lt '$(v2)'";
         package_version_equal_command => "$(sys.bindir)/rpmvercmp '$(v1)' eq '$(v2)'";
 
-    (redhat|SuSE|suse|sles)::
-        package_update_command     => "$(sys.workdir)/bin/cf-upgrade -b $(cfe_internal_update_bins.backup_script) -s $(cfe_internal_update_bins.backup_file) -i $(cfe_internal_update_bins.install_script)";
+    (redhat|SuSE|suse|sles|debian|solarisx86|solaris)::
+        package_update_command     => "$(sys.workdir)/bin/cf-upgrade -b $(cfengine_software_version_packages1.backup_script) -s $(cfengine_software_version_packages1.backup_file) -i $(cfengine_software_version_packages1.install_script)";
 
     redhat.!redhat_4::
         package_list_update_command => "/usr/bin/yum --quiet check-update";
@@ -907,8 +918,6 @@ body package_method u_generic(repo)
       # Cfengine appends path to package and package name below, respectively
         package_add_command        => "/bin/sh $(repo)/add_scr $(repo)/admin_file";
         package_delete_command     => "/usr/sbin/pkgrm -n -a $(repo)/admin_file";
-    (solarisx86|solaris)::
-        package_update_command     => "$(sys.workdir)/bin/cf-upgrade -b $(cfe_internal_update_bins.backup_script) -s $(cfe_internal_update_bins.backup_file) -i $(cfe_internal_update_bins.install_script)";
 
     aix::
 
@@ -941,18 +950,22 @@ body package_method u_generic(repo)
 }
 
 body package_module yum
+# @brief Yum package module default settings
 {
       query_installed_ifelapsed => "10";
       query_updates_ifelapsed => "30";
 }
 
 body package_module apt_get
+# @brief apt_get package module default settings
 {
       query_installed_ifelapsed => "10";
       query_updates_ifelapsed => "30";
 }
 
 body perms u_m(p)
+# @brief Ensure mode is `p`
+# @param p permissions
 {
       mode  => "$(p)";
 }

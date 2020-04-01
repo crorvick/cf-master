@@ -5,6 +5,7 @@
 #
 ###############################################################################
 bundle common def
+# @brief Common settings for the Masterfiles Policy Framework
 {
   classes:
     "_workaround_CFE_2333" -> { "https://tracker.mender.io/browse/CFE-2333" }
@@ -182,6 +183,16 @@ bundle common def
 
       # Agent Controls
 
+      "control_agent_abortclasses" -> { "ENT-4823" }
+        slist => { },
+        comment => "The control body has a variable, so a valid list must be defined or the agent will error",
+        if => not( isvariable( $(this.promiser) ));
+
+      "control_agent_abortbundleclasses" -> { "ENT-4823" }
+        slist => { "abortbundle" },
+        comment => "The control body has a variable, so a valid list must be defined or the agent will error",
+        if => not( isvariable( $(this.promiser) ));
+
       "control_agent_default_repository"
         string => ifelse( isvariable( "control_agent_default_repository"),
                           $(control_agent_default_repository),
@@ -235,6 +246,14 @@ bundle common def
         int => "200",
         ifvarclass => not( isvariable( "control_server_maxconnections" ) );
 
+      # Package inventory refresh
+      "package_module_query_installed_ifelapsed" -> { "CFE-2771" }
+        string => "60", # 1 hour
+        if => not( isvariable( $(this.promiser) ));
+
+      "package_module_query_updates_ifelapsed" -> { "CFE-2771" }
+        string => "1440", # 1 day
+        if => not( isvariable( $(this.promiser) ));
 
     debian::
       "environment_vars"
@@ -258,13 +277,16 @@ bundle common def
       comment => "Define reports path",
       handle => "common_def_vars_dir_reports";
 
-      "dir_software"    string => translatepath("$(sys.workdir)/master_software_updates"),
-      comment => "Define software path",
-      handle => "common_def_vars_dir_software";
-
       "dir_bin"         string => translatepath("$(sys.bindir)"),
       comment => "Define binary path",
       handle => "common_def_vars_dir_bin";
+
+      "dir_data"
+        string => ifelse( isvariable( "def.dir_data"),
+                          $(def.dir_data),
+                          "$(sys.workdir)/data"),
+      comment => "Define data path",
+      handle => "common_def_vars_dir_data";
 
       "dir_modules"     string => translatepath("$(sys.workdir)/modules"),
       comment => "Define modules path",
@@ -289,6 +311,19 @@ bundle common def
       "cf_apache_group" string => "cfapache",
       comment => "Group that CFEngine Enterprise webserver runs as",
       handle => "common_def_vars_cf_cfapache_group";
+
+    policy_server|am_policy_hub::
+
+      # Only hubs serve software updates
+
+      "dir_master_software_updates" -> { "ENT-4953" }
+        string => "$(sys.workdir)/master_software_updates",
+        handle => "common_def_vars_dir_serve_master_software_updates",
+        comment => "Path where software updates are served from the policy hub.
+        This variable is overridable via augments as
+        vars.dir_master_software_updates. All remote agents request this path
+        via the master_software_updates shortcut.",
+        if => not( isvariable( "def.dir_master_software_updates" ));
 
     solaris::
       "cf_runagent_shell"
@@ -405,6 +440,11 @@ bundle common def
                     "Min50", "Min55" },
         unless => isvariable(control_hub_hub_schedule);
 
+      "control_hub_query_timeout"
+        comment => "Configurable timeout for cf-hub outgoing connections",
+        string => "0", # 0 = default is set by cf-hub binary
+        unless => isvariable(control_hub_query_timeout);
+
       "control_hub_port"
         comment => "cf-hub performs pull collection on port 5308, unless
                     overridden by augments",
@@ -500,12 +540,6 @@ bundle common def
       # NOTE THAT THIS CLASS ALSO NEEDS TO BE SET IN update.cf
 
       "cfengine_internal_preserve_permissions" expression => "!any";
-
-      # Allow the hub to edit sudoers in order for the Apache user to
-      # run passwordless sudo cf-runagent. Enable this if you want the
-      # Mission Portal to be able to troubleshoot failed Design Center
-      # sketch activations on a host.
-      "cfengine_internal_sudoers_editing_enable" expression => "!any";
 
       # Class defining which versions of cfengine are (not) supported
       # by this policy version.
